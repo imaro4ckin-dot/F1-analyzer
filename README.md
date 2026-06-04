@@ -2,61 +2,101 @@
 
 > *Telemetry tells you what the car did. Radio tells you how the driver felt about it.*
 
-Most F1 data projects visualize car physics — speed traces, G-force envelopes, tyre degradation curves. This project does something different: it maps a driver's **psychological and structural stress** by cross-referencing telemetry anomalies with the official team radio audio clips that accompany them.
-
-The core insight is temporal. A lock-up at Turn 1, a battery SoC drop, a sudden lift off throttle — these are data events. But layered on top of them is a human reaction: a sharp exhale, a frustrated "come on", a calm "box box, box box". This tool synchronizes those two streams and lets you explore both simultaneously.
+An interactive web dashboard that maps a driver's **psychological and structural stress** by correlating continuous AI predictions over raw telemetry with team radio transmissions — anchored to the exact track position where they were broadcast.
 
 ---
 
-## The Problem This Solves
+## Dashboard
 
-Telemetry data is microsecond-precise but emotionally opaque. Team radio is emotionally rich but temporally imprecise. Neither source alone tells the full story of a difficult stint.
+```
+┌── F1 STRESS ANALYZER ─────────────────────────────────────────────────────┐
+│  [2024] [Monaco · Monte-Carlo] [LEC]  [ANALYZE]   18 radio events · 42k pts│
+├────────────────────────────────────┬───────────────────────────────────────┤
+│  TELEMETRY & AI STRESS             │  TRACK MAP · RADIO EVENTS             │
+│                                    │                                        │
+│  Speed ────────────────────────    │       ╭────────────────╮               │
+│  Throttle ·····················    │       │   ● ●          │               │
+│  AI Stress ████████████████████    │       │         ●      │               │
+│  ▼ Brake events                    │       │  ╭─────╯  ●    │               │
+│  ◆ Radio marker (clickable)        │       ╰──╯             │               │
+│                                    │    ● = radio event (colour = stress)   │
+├────────────────────────────────────┴───────────────────────────────────────┤
+│  RADIO TRANSMISSION  15:42:11                                               │
+│  AI STRESS: ████████░░  7.4/10                                             │
+│  "Box box box, come on, these tyres are gone"                              │
+│  [▶ Audio player]                                                           │
+└────────────────────────────────────────────────────────────────────────────┘
+```
 
-This project builds a **temporal index** that bridges the two: every radio message is anchored to the exact point in the car's telemetry timeline where it was transmitted, and the car's state at that moment — speed, throttle position, brake application — is surfaced alongside the transcript.
-
----
-
-## Current Capabilities
-
-### Multi-Modal Data Synchronization
-Aligns FastF1 microsecond-level telemetry packets with OpenF1 audio timestamps. The alignment uses absolute timestamp matching rather than lap-relative offsets, making it robust across safety car periods and red flags where lap timing becomes unreliable.
-
-### Local AI Transcription
-Downloads `.mp3` radio streams into temporary memory and transcribes them locally using OpenAI Whisper (medium model). Transcription runs entirely on-device — no data leaves the machine, no API keys required for the audio pipeline.
-
-**Hallucination prevention:** Whisper has a known failure mode where it echoes its own prompt back during silent audio (pure engine noise). The system uses a domain-specific context primer (`"Formula 1 team radio. [DRIVER] speaking to race engineer..."`) combined with `temperature=0.0` and `no_speech_threshold=0.6` to suppress this. Any transcript that contains its own prompt text is discarded and replaced with `[No audible human speech detected]`.
-
-### Kinematic Agitation Fallback
-When OpenF1 has no radio data for a driver/session combination, the system falls back to a **Kinematic Agitation Model**: it takes the derivative of throttle and brake inputs over a 500-sample window to detect erratic driving behavior and returns a normalized stress score out of 10.0.
-
-This isn't a degraded experience — it's a parallel analytical lens. A driver with no radio messages but a kinematic agitation score of 8.4 is telling you something.
-
-### Fault-Tolerant Architecture
-- Zero-byte audio payloads are detected and skipped before Whisper sees them
-- Corrupt FFmpeg frames are caught at the `RuntimeError` level without crashing the session
-- API responses that return error dictionaries (e.g. `{"detail": "Not found"}`) are handled at every endpoint, not just the primary one
-- Graceful driver code fallback when an invalid abbreviation is entered
+Click any **red circle on the track map** or **diamond marker on the telemetry chart** to reveal the radio panel: transcript, AI stress score, and inline audio playback.
 
 ---
 
-## Roadmap: The Full Vision
+## What Makes This Different
 
-The current CLI is the data engine. The planned dashboard is the interface that makes it legible.
+Most F1 data projects visualize car physics. This one correlates them with human state. Every radio message is placed at the exact X/Y coordinate on the track where it was transmitted. The AI stress curve runs continuously across the entire race — not just at radio timestamps — so you can see the build-up before a driver speaks.
 
-### Anomaly Detection Layer
-An algorithm that flags uncharacteristic telemetry events: sudden drops below expected speed at a given corner, G-force spikes that exceed the session's rolling baseline, battery SoC drops that suggest deployment strategy changes or failures. These anomalies become the anchors around which radio messages are clustered.
+---
 
-### Sentiment Mapping
-Map transcripts to an NLP classifier to categorize each radio message: `Panic/Issue`, `Frustration/Traffic`, `Strategy Update`, `Driver Report`, `Acknowledgement`. These categories become color-coded markers plotted directly on the telemetry timeline — letting you see at a glance whether a difficult sector was mechanical, tactical, or psychological.
+## Architecture
 
-### Interactive Dashboard
-A timeline-based visualization where:
-- Clicking a telemetry anomaly jumps to the nearest radio clip and plays the audio
-- Clicking a sentiment marker highlights the corresponding section of the telemetry trace
-- A 2D track map overlay shows where each radio event occurred on-circuit
+```
+F1 Analyzer/
+├── app/
+│   ├── dashboard.py      ← entry point: python app/dashboard.py
+│   ├── layout.py         ← Dash layout, dark F1 theme
+│   └── callbacks.py      ← all Dash callbacks + figure builders
+├── core/
+│   ├── data_loader.py    ← FastF1 + OpenF1 API wrappers
+│   ├── predictor.py      ← continuous ML stress prediction
+│   └── transcriber.py    ← Whisper audio transcription
+├── ml/
+│   ├── f1_stress_model.pkl         ← trained Random Forest model
+│   ├── f1_all_seasons_training_data.csv
+│   ├── collect_training_data.py    ← scrape + transcribe pipeline
+│   └── train_model.py              ← train and save the model
+├── cache/                ← FastF1 session cache (gitignored)
+└── requirements.txt
+```
 
-### Temporal Precision at Scale
-The core architectural challenge is matching audio timestamps (second-level precision, UTC-anchored) to telemetry packets (10Hz, session-relative). The current implementation handles this. The dashboard will expose this indexing layer as a queryable API so the frontend can seek to arbitrary moments without re-processing.
+---
+
+## How to Run
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Launch the dashboard
+python app/dashboard.py
+```
+
+Open `http://localhost:8050` in your browser. Select a season, Grand Prix, and driver, then click **ANALYZE**.
+
+> **Note:** First run downloads Whisper weights (~1.5 GB) and loads the FastF1 session into the cache. Subsequent runs for the same race are fast.
+
+---
+
+## AI Pipeline
+
+### Continuous Stress Prediction
+A Random Forest model (200 trees) trained on ~4 seasons of telemetry-radio pairs predicts driver stress from 8 kinematic features: average speed, max speed, speed variance, throttle volatility, throttle snap frequency, brake switch count, average RPM, max RPM.
+
+Rather than predicting only at radio timestamps, the dashboard slides a 100-row window every 10 rows across the full telemetry dataset, producing a continuous stress curve at ~10Hz resolution. The result is a red filled area chart overlaid on the speed trace.
+
+### Training the Model
+The training labels are derived from VADER sentiment analysis on Whisper transcripts: negative/stressed speech maps to high stress scores, calm/positive speech maps to low scores. The model learns to reproduce these labels from the kinematic features alone — so it can predict stress even when there is no radio.
+
+```bash
+# Collect training data (requires network + time)
+python ml/collect_training_data.py
+
+# Train and save the model
+python ml/train_model.py
+```
+
+### Radio Sync
+Radio timestamps from OpenF1 are matched to FastF1 telemetry by absolute UTC timestamp. Track X/Y coordinates at each radio event are extracted from FastF1's position data stream and used to place markers on the map.
 
 ---
 
@@ -64,45 +104,15 @@ The core architectural challenge is matching audio timestamps (second-level prec
 
 | Layer | Technology |
 |---|---|
-| Language | Python 3.x |
+| Web dashboard | [Dash](https://dash.plotly.com/) + [Plotly](https://plotly.com/python/) |
 | Telemetry | [FastF1](https://docs.fastf1.dev/) |
-| Live Timing & Radio | [OpenF1 API](https://openf1.org/) |
-| Transcription | [OpenAI Whisper](https://github.com/openai/whisper) (local, medium model) |
-| Audio Processing | FFmpeg |
-| Data Engineering | `pandas`, `requests`, `tempfile` |
+| Live timing & radio | [OpenF1 API](https://openf1.org/) |
+| ML model | scikit-learn RandomForestRegressor |
+| Transcription | [OpenAI Whisper](https://github.com/openai/whisper) (local, medium) |
+| Data | pandas, numpy |
 
 ---
 
-## Usage
+## Data Coverage
 
-```bash
-python main.py
-```
-
-The script prompts interactively:
-
-```
-Enter the Year (e.g., 2023, 2024): 2024
-
-Fetching available races for 2024 from OpenF1...
-
---- Available Races ---
-1. Bahrain - Sakhir
-2. Saudi Arabia - Jeddah
-...
-
-Select a race number: 5
-
---- Available Drivers ---
-VER, PER, HAM, RUS, LEC, SAI, ...
-
-Enter the 3-letter code of the driver to analyze: HAM
-```
-
-**Note:** OpenF1 API coverage begins in 2023. Earlier seasons will return a data limitation warning.
-
----
-
-## Architecture Note
-
-The temporal indexing problem is harder than it looks. FastF1 telemetry timestamps are session-relative and must be reconstructed to UTC before they can be matched against OpenF1's absolute timestamps. DST handling, session timezone offsets, and the gap between qualifying and race sessions all introduce alignment errors if the reconstruction is naive. The current implementation anchors on session start time from FastF1's metadata and applies the offset uniformly across the telemetry frame before alignment.
+OpenF1 API radio data is available from the **2023 season onwards**. FastF1 telemetry goes back to 2018 but radio sync requires OpenF1, so the dashboard is limited to 2023+.

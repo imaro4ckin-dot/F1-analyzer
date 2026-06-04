@@ -1,0 +1,80 @@
+import ssl
+import os
+import fastf1
+import requests
+import pandas as pd
+
+# macOS SSL bypass for FastF1 / model weight downloads
+ssl._create_default_https_context = ssl._create_unverified_context
+
+_CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "cache")
+os.makedirs(_CACHE_DIR, exist_ok=True)
+fastf1.Cache.enable_cache(_CACHE_DIR)
+
+
+def fetch_races(year: int) -> list:
+    """Return list of race session dicts from OpenF1 for a given year (2023+)."""
+    url = f"https://api.openf1.org/v1/sessions?year={year}&session_name=Race"
+    try:
+        data = requests.get(url, timeout=15).json()
+        if isinstance(data, dict) or not data:
+            return []
+        return data
+    except Exception:
+        return []
+
+
+def load_session(year: int, location: str) -> fastf1.core.Session:
+    """Load and return a FastF1 Race session with telemetry."""
+    session = fastf1.get_session(year, location, "R")
+    session.load(telemetry=True, weather=False)
+    return session
+
+
+def get_driver_map(session: fastf1.core.Session) -> dict:
+    """Return {abbreviation: driver_number} for all drivers in a session."""
+    driver_map = {}
+    for num in session.drivers:
+        try:
+            info = session.get_driver(num)
+            if info.get("Abbreviation"):
+                driver_map[info["Abbreviation"]] = num
+        except Exception:
+            continue
+    return driver_map
+
+
+def get_telemetry(session: fastf1.core.Session, driver_code: str) -> pd.DataFrame:
+    """Return car telemetry DataFrame for a driver (Date, Speed, Throttle, Brake, RPM, …)."""
+    tel = session.laps.pick_drivers(driver_code).get_car_data()
+    # Ensure Date column is timezone-naive for consistent timestamp arithmetic
+    if hasattr(tel["Date"].dtype, "tz") and tel["Date"].dtype.tz is not None:
+        tel["Date"] = tel["Date"].dt.tz_localize(None)
+    return tel
+
+
+def get_track_coords(session: fastf1.core.Session, driver_code: str) -> pd.DataFrame:
+    """
+    Return position data (X, Y, Date) for drawing the track outline and placing radio markers.
+    Coordinates are in metres from an arbitrary circuit origin.
+    """
+    pos = session.laps.pick_drivers(driver_code).get_pos_data()
+    if hasattr(pos["Date"].dtype, "tz") and pos["Date"].dtype.tz is not None:
+        pos["Date"] = pos["Date"].dt.tz_localize(None)
+    return pos[["Date", "X", "Y"]].dropna()
+
+
+def fetch_radio(session_key: int, driver_num: str) -> list:
+    """
+    Return list of team radio message dicts from OpenF1.
+    Each dict has keys: date, recording_url.
+    Returns empty list if no radio data is available.
+    """
+    url = f"https://api.openf1.org/v1/team_radio?session_key={session_key}&driver_number={driver_num}"
+    try:
+        data = requests.get(url, timeout=10).json()
+        if isinstance(data, dict) or not data:
+            return []
+        return data
+    except Exception:
+        return []
