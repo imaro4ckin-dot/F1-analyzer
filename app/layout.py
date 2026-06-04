@@ -166,8 +166,17 @@ def build_layout():
                             html.Div("TELEMETRY & AI STRESS", style={**LABEL_STYLE, "marginBottom": "12px"}),
                             dcc.Graph(
                                 id="chart-telemetry",
-                                config={"displayModeBar": False},
-                                style={"height": "420px"},
+                                config={
+                                    "displayModeBar": True,
+                                    "modeBarButtonsToRemove": [
+                                        "select2d", "lasso2d", "autoScale2d",
+                                        "hoverClosestCartesian", "hoverCompareCartesian",
+                                        "toggleSpikelines",
+                                    ],
+                                    "displaylogo": False,
+                                    "toImageButtonOptions": {"format": "png", "filename": "f1_telemetry"},
+                                },
+                                style={"height": "520px"},
                                 figure=_empty_figure("Select a race and driver, then click ANALYZE"),
                             ),
                         ],
@@ -187,8 +196,12 @@ def build_layout():
                             html.Div("TRACK MAP  ·  RADIO EVENTS", style={**LABEL_STYLE, "marginBottom": "12px"}),
                             dcc.Graph(
                                 id="chart-track",
-                                config={"displayModeBar": False},
-                                style={"height": "420px"},
+                                config={
+                                    "displayModeBar": True,
+                                    "modeBarButtonsToRemove": ["select2d", "lasso2d", "toggleSpikelines"],
+                                    "displaylogo": False,
+                                },
+                                style={"height": "520px"},
                                 figure=_empty_figure(""),
                             ),
                         ],

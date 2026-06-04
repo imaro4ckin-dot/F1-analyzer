@@ -25,37 +25,61 @@ model = whisper.load_model("medium")
 
 # --- FEATURE ENGINEERING HELPER ---
 def extract_telemetry_features(telemetry_slice):
-    """Extracts detailed statistical features from a telemetry slice before a radio call."""
+    """
+    Extracts 12 kinematic features from a telemetry slice before a radio call.
+    Must stay in sync with core/predictor.py _FEATURES list.
+    """
     if telemetry_slice.empty or len(telemetry_slice) < 5:
         return None
 
-    # Speed metrics
-    avg_speed = telemetry_slice['Speed'].mean()
-    max_speed = telemetry_slice['Speed'].max()
-    speed_var = telemetry_slice['Speed'].var()
+    speed = telemetry_slice['Speed']
+    throttle = telemetry_slice['Throttle']
+    brake = telemetry_slice['Brake'].astype(int)
+    rpm = telemetry_slice['RPM']
 
-    # Throttle inputs ( volatility & snap frequency )
-    throttle_diff = telemetry_slice['Throttle'].diff().abs()
-    throttle_volatility = throttle_diff.mean()
-    throttle_snaps = throttle_diff[throttle_diff > 20].count()
+    throttle_diff = throttle.diff().abs()
+    brake_diff = brake.diff().abs()
+    speed_diff = speed.diff()
+    speed_var = speed.var()
 
-    # Brake inputs ( frequency of applications )
-    brake_diff = telemetry_slice['Brake'].astype(int).diff().abs()
-    brake_switches = brake_diff[brake_diff > 0].count()
+    # min_speed: braking floor — how slow did they go?
+    min_spd = float(speed.min())
 
-    # Engine strain metrics
-    avg_rpm = telemetry_slice['RPM'].mean()
-    max_rpm = telemetry_slice['RPM'].max()
+    # max_speed_drop: sharpest single deceleration step (lockup / lift proxy)
+    neg = speed_diff[speed_diff < 0]
+    max_drop = float(abs(neg.min())) if len(neg) > 0 else 0.0
+
+    # gear_change_rate: gear shifts per sample (erratic under stress)
+    if 'nGear' in telemetry_slice.columns:
+        gear_diff = telemetry_slice['nGear'].diff().abs()
+        gear_changes = int(gear_diff[gear_diff > 0].count())
+        gear_change_rate = round(gear_changes / max(len(telemetry_slice), 1), 4)
+    else:
+        gear_change_rate = 0.0
+
+    # drs_rate: fraction of window with DRS open (value 8 in FastF1)
+    if 'DRS' in telemetry_slice.columns:
+        drs_open = int((telemetry_slice['DRS'] == 8).sum())
+        drs_rate = round(drs_open / max(len(telemetry_slice), 1), 4)
+    else:
+        drs_rate = 0.0
+
+    def _s(v):
+        return 0.0 if (v is None or pd.isna(v)) else round(float(v), 4)
 
     return {
-        "avg_speed": round(avg_speed, 2),
-        "max_speed": int(max_speed),
-        "speed_variance": round(speed_var, 2) if not pd.isna(speed_var) else 0.0,
-        "throttle_volatility": round(throttle_volatility, 2) if not pd.isna(throttle_volatility) else 0.0,
-        "throttle_snaps": int(throttle_snaps),
-        "brake_switches": int(brake_switches),
-        "avg_rpm": round(avg_rpm, 1),
-        "max_rpm": int(max_rpm)
+        "avg_speed":           _s(speed.mean()),
+        "max_speed":           _s(speed.max()),
+        "min_speed":           _s(min_spd),
+        "speed_variance":      _s(speed_var),
+        "max_speed_drop":      _s(max_drop),
+        "throttle_volatility": _s(throttle_diff.mean()),
+        "throttle_snaps":      int(throttle_diff[throttle_diff > 20].count()),
+        "brake_switches":      int(brake_diff[brake_diff > 0].count()),
+        "avg_rpm":             _s(rpm.mean()),
+        "max_rpm":             _s(rpm.max()),
+        "gear_change_rate":    gear_change_rate,
+        "drs_rate":            drs_rate,
     }
 
 
@@ -63,9 +87,11 @@ def extract_telemetry_features(telemetry_slice):
 def main():
     # Initialize persistent storage layer with structured schema matrix if missing
     if not os.path.exists(OUTPUT_CSV):
-        headers = ["year", "location", "driver", "timestamp", "avg_speed", "max_speed",
-                   "speed_variance", "throttle_volatility", "throttle_snaps",
-                   "brake_switches", "avg_rpm", "max_rpm", "transcript"]
+        headers = ["year", "location", "driver", "timestamp",
+                   "avg_speed", "max_speed", "min_speed", "speed_variance", "max_speed_drop",
+                   "throttle_volatility", "throttle_snaps", "brake_switches",
+                   "avg_rpm", "max_rpm", "gear_change_rate", "drs_rate",
+                   "transcript"]
         pd.DataFrame(columns=headers).to_csv(OUTPUT_CSV, index=False)
 
     # Outer loop: Iterate sequentially across all available F1 data eras

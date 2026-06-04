@@ -98,7 +98,6 @@ def register_callbacks(app):
 
         # ── Continuous AI stress curve ──────────────────────────────────────
         model = _get_model()
-        stress = predict_continuous(tel, model)
 
         # ── Track position data ─────────────────────────────────────────────
         try:
@@ -110,6 +109,13 @@ def register_callbacks(app):
         races = fetch_races(int(year))
         session_key = next((r["session_key"] for r in races if r["location"] == race_location), None)
         radio_messages = fetch_radio(session_key, driver_num) if session_key else []
+        has_radio = len(radio_messages) > 0
+
+        # Choose stress prediction mode based on radio availability
+        # With radio   → RF model (trained on radio-labelled kinematic data)
+        # Without radio → session z-score anomaly (no labels needed, self-calibrating)
+        stress = predict_continuous(tel, model, use_anomaly=not has_radio)
+        stress_mode = "RF Model" if has_radio else "Anomaly Z-Score"
 
         # Build enriched radio records (stress + track position + transcript)
         radio_records = []
@@ -119,7 +125,7 @@ def register_callbacks(app):
             radio_time = pd.to_datetime(msg["date"]).tz_localize(None)
             audio_url = msg.get("recording_url", "")
 
-            # Stress at this moment
+            # Stress at this moment (always use RF model for per-event annotation)
             stress_val = predict_at_timestamp(tel, radio_time, model)
 
             # Track position at this moment
@@ -144,13 +150,13 @@ def register_callbacks(app):
             })
 
         # ── Build telemetry figure ──────────────────────────────────────────
-        tel_fig = _build_telemetry_figure(tel, stress, radio_records, driver_code)
+        tel_fig = _build_telemetry_figure(tel, stress, radio_records, driver_code, stress_mode)
 
         # ── Build track map figure ──────────────────────────────────────────
         track_fig = _build_track_figure(pos, radio_records)
 
         meta = {"year": year, "location": race_location, "driver": driver_code}
-        status = f"{len(radio_records)} radio events  ·  {len(tel)} telemetry points"
+        status = f"{len(radio_records)} radio events  ·  {len(tel)} telemetry points  ·  AI: {stress_mode}"
         return tel_fig, track_fig, radio_records, meta, status
 
     # ── 3. Show radio panel on marker click ─────────────────────────────────
@@ -211,84 +217,168 @@ def _err_fig():
     return _empty_figure("Error loading data")
 
 
-def _build_telemetry_figure(tel, stress, radio_records, driver_code):
-    fig = _base_fig()
-    fig.update_layout(hovermode="x unified")
+def _build_telemetry_figure(tel, stress, radio_records, driver_code, stress_mode="RF Model"):
+    """
+    Three-row subplot layout to avoid y-axis overlap:
+      Row 1 (50%): Speed (white) + Brake dots (orange)
+      Row 2 (30%): AI Stress filled area (red)
+      Row 3 (20%): Throttle % (green)
+    Radio events appear as red vertical lines + clickable diamonds on all rows.
+    """
+    from plotly.subplots import make_subplots
+
+    fig = make_subplots(
+        rows=3, cols=1,
+        shared_xaxes=True,
+        row_heights=[0.50, 0.30, 0.20],
+        vertical_spacing=0.03,
+        subplot_titles=("", "", ""),
+    )
 
     x = tel["Date"]
 
-    # Speed (white, primary y-axis)
+    # ── Row 1: Speed ─────────────────────────────────────────────────────────
     fig.add_trace(go.Scatter(
         x=x, y=tel["Speed"],
         name="Speed (km/h)",
-        line={"color": WHITE, "width": 1.5},
-        yaxis="y",
-        hovertemplate="%{y:.0f} km/h",
-    ))
+        line={"color": WHITE, "width": 1.8},
+        hovertemplate="Speed: %{y:.0f} km/h<extra></extra>",
+    ), row=1, col=1)
 
-    # Throttle (green, secondary y-axis)
-    fig.add_trace(go.Scatter(
-        x=x, y=tel["Throttle"],
-        name="Throttle %",
-        line={"color": GREEN, "width": 1, "dash": "dot"},
-        yaxis="y2",
-        opacity=0.7,
-        hovertemplate="%{y:.0f}%",
-    ))
-
-    # AI Stress (red filled area, tertiary y-axis 0-10)
-    fig.add_trace(go.Scatter(
-        x=x, y=stress,
-        name="AI Stress",
-        fill="tozeroy",
-        fillcolor="rgba(225,6,0,0.15)",
-        line={"color": RED, "width": 2},
-        yaxis="y3",
-        hovertemplate="Stress: %{y:.1f}/10",
-    ))
-
-    # Brake events (orange dots on speed line)
     brake_mask = tel["Brake"].astype(bool)
     fig.add_trace(go.Scatter(
         x=x[brake_mask], y=tel["Speed"][brake_mask],
         name="Braking",
         mode="markers",
-        marker={"color": ORANGE, "size": 3, "symbol": "circle"},
-        yaxis="y",
-        hovertemplate="Braking @ %{y:.0f} km/h",
-    ))
+        marker={"color": ORANGE, "size": 4, "symbol": "circle"},
+        hovertemplate="Brake @ %{y:.0f} km/h<extra></extra>",
+    ), row=1, col=1)
 
-    # Radio vertical lines + markers
+    # ── Row 2: AI Stress ──────────────────────────────────────────────────────
+    fig.add_trace(go.Scatter(
+        x=x, y=stress,
+        name=f"AI Stress [{stress_mode}]",
+        fill="tozeroy",
+        fillcolor="rgba(225,6,0,0.18)",
+        line={"color": RED, "width": 2},
+        hovertemplate="Stress: %{y:.2f}/10<extra></extra>",
+    ), row=2, col=1)
+
+    # ── Row 3: Throttle ───────────────────────────────────────────────────────
+    fig.add_trace(go.Scatter(
+        x=x, y=tel["Throttle"],
+        name="Throttle %",
+        line={"color": GREEN, "width": 1.2},
+        fill="tozeroy",
+        fillcolor="rgba(57,255,20,0.08)",
+        hovertemplate="Throttle: %{y:.0f}%<extra></extra>",
+    ), row=3, col=1)
+
+    # ── Radio markers on all three rows ───────────────────────────────────────
     for i, rec in enumerate(radio_records):
         rt = pd.to_datetime(rec["time"])
-        transcript_short = rec["transcript"][:40] + ("…" if len(rec["transcript"]) > 40 else "")
-        fig.add_vline(
-            x=rt,
-            line={"color": RED, "width": 1, "dash": "dash"},
-            opacity=0.5,
-        )
-        # Invisible scatter point to make vlines clickable
+        transcript_short = rec["transcript"][:45] + ("…" if len(rec["transcript"]) > 45 else "")
+
+        # Dashed line across all rows — add as a zero-width scatter instead of vline
+        # (vline in subplots requires string xref which is complex; scatter is simpler)
+        for row_num, y_col in ((1, tel["Speed"]), (2, stress), (3, tel["Throttle"])):
+            y_mid = float(y_col.median())
+            fig.add_trace(go.Scatter(
+                x=[rt, rt],
+                y=[float(y_col.min()), float(y_col.max())],
+                mode="lines",
+                line={"color": RED, "width": 1, "dash": "dash"},
+                opacity=0.45,
+                hoverinfo="skip",
+                showlegend=False,
+            ), row=row_num, col=1)
+
+        # Clickable diamond on speed row (row 1)
+        # Find speed at this timestamp for y-position
+        closest_idx = (tel["Date"] - rt).abs().argsort().iloc[0]
+        y_speed = float(tel["Speed"].iloc[closest_idx])
+
         fig.add_trace(go.Scatter(
             x=[rt],
-            y=[rec["stress"]],
-            mode="markers",
-            marker={"color": RED, "size": 10, "symbol": "diamond", "line": {"color": WHITE, "width": 1}},
-            name=f"Radio #{i+1}",
-            yaxis="y3",
+            y=[y_speed],
+            mode="markers+text",
+            marker={"color": RED, "size": 11, "symbol": "diamond",
+                    "line": {"color": WHITE, "width": 1.5}},
+            text=[f"R{i+1}"],
+            textposition="top center",
+            textfont={"color": WHITE, "size": 9},
             customdata=[i],
-            hovertemplate=f"<b>Radio #{i+1}</b><br>{transcript_short}<br>Stress: {rec['stress']:.1f}/10<extra></extra>",
+            name=f"Radio",
+            hovertemplate=(
+                f"<b>Radio #{i+1}</b><br>"
+                f"{transcript_short}<br>"
+                f"Stress: {rec['stress']:.1f}/10"
+                "<extra></extra>"
+            ),
             showlegend=False,
-        ))
+        ), row=1, col=1)
 
+    # ── Layout ────────────────────────────────────────────────────────────────
     fig.update_layout(
-        yaxis={"title": {"text": "Speed (km/h)", "font": {"color": WHITE, "size": 10}}, "side": "left"},
-        yaxis2={"title": {"text": "Throttle %", "font": {"color": GREEN, "size": 10}},
-                "overlaying": "y", "side": "right", "range": [0, 110], "showgrid": False},
-        yaxis3={"title": {"text": "Stress /10", "font": {"color": RED, "size": 10}},
-                "overlaying": "y", "side": "right", "range": [0, 10], "showgrid": False,
-                "anchor": "free", "position": 0.97},
-        title={"text": f"{driver_code}  ·  Telemetry + AI Stress", "font": {"size": 12, "color": GREY}, "x": 0},
+        paper_bgcolor=CARD,
+        plot_bgcolor=CARD,
+        font={"color": WHITE, "family": "JetBrains Mono, Courier New, monospace", "size": 11},
+        margin={"l": 60, "r": 20, "t": 30, "b": 40},
+        legend={
+            "bgcolor": "rgba(0,0,0,0.5)",
+            "bordercolor": BORDER,
+            "borderwidth": 1,
+            "font": {"size": 10, "color": WHITE},
+            "orientation": "h",
+            "y": 1.04,
+            "x": 0,
+        },
+        hovermode="x unified",
+        dragmode="zoom",
     )
+
+    # Shared x-axis bottom label
+    fig.update_xaxes(
+        gridcolor=BORDER, zerolinecolor=BORDER,
+        tickfont={"color": GREY, "size": 10},
+        showticklabels=False, row=1, col=1,
+    )
+    fig.update_xaxes(
+        gridcolor=BORDER, zerolinecolor=BORDER,
+        tickfont={"color": GREY, "size": 10},
+        showticklabels=False, row=2, col=1,
+    )
+    fig.update_xaxes(
+        gridcolor=BORDER, zerolinecolor=BORDER,
+        tickfont={"color": GREY, "size": 10},
+        showticklabels=True, row=3, col=1,
+    )
+
+    # Y-axis labels — one per row, left side only
+    fig.update_yaxes(
+        title={"text": "km/h", "font": {"color": WHITE, "size": 10}},
+        gridcolor=BORDER, zerolinecolor=BORDER,
+        tickfont={"color": GREY, "size": 10},
+        row=1, col=1,
+    )
+    fig.update_yaxes(
+        title={"text": "Stress", "font": {"color": RED, "size": 10}},
+        range=[0, 10],
+        gridcolor=BORDER, zerolinecolor=BORDER,
+        tickfont={"color": RED, "size": 10},
+        row=2, col=1,
+    )
+    fig.update_yaxes(
+        title={"text": "Throttle %", "font": {"color": GREEN, "size": 10}},
+        range=[0, 105],
+        gridcolor=BORDER, zerolinecolor=BORDER,
+        tickfont={"color": GREEN, "size": 10},
+        row=3, col=1,
+    )
+
+    # Remove subplot title annotations (they show up as blank space otherwise)
+    fig.update_annotations(font_size=0)
+
     return fig
 
 

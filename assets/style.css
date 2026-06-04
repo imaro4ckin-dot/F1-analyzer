@@ -1,54 +1,116 @@
 /* F1 Stress Analyzer — dark theme stylesheet */
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&display=swap');
 
-/* Dropdown internals */
-.f1-dropdown .Select-control {
+/* ── Dash 4 Dropdown (uses VirtualizedSelect / react-select internally) ── */
+/* Container */
+.f1-dropdown .dash-dropdown,
+.f1-dropdown > div {
     background-color: #1C1C1C !important;
     border-color: #2A2A2A !important;
+    color: #F5F5F5 !important;
 }
+/* The visible control box */
+.f1-dropdown .Select-control,
+.f1-dropdown [class*="-control"] {
+    background-color: #1C1C1C !important;
+    border-color: #2A2A2A !important;
+    box-shadow: none !important;
+}
+.f1-dropdown [class*="-control"]:hover {
+    border-color: #E10600 !important;
+}
+/* Placeholder */
+.f1-dropdown [class*="-placeholder"],
+.f1-dropdown .Select-placeholder {
+    color: #888888 !important;
+}
+/* Selected value */
+.f1-dropdown [class*="-singleValue"],
+.f1-dropdown .Select-value-label {
+    color: #F5F5F5 !important;
+}
+/* Input text */
+.f1-dropdown [class*="-Input"] input,
+.f1-dropdown input {
+    color: #F5F5F5 !important;
+    caret-color: #E10600;
+}
+/* Dropdown menu */
+.f1-dropdown [class*="-menu"],
 .f1-dropdown .Select-menu-outer {
     background-color: #1C1C1C !important;
-    border-color: #2A2A2A !important;
+    border: 1px solid #2A2A2A !important;
+    z-index: 9999 !important;
 }
+/* Menu items */
+.f1-dropdown [class*="-option"],
 .f1-dropdown .Select-option {
     background-color: #1C1C1C !important;
     color: #F5F5F5 !important;
+    cursor: pointer;
 }
+.f1-dropdown [class*="-option"]:hover,
 .f1-dropdown .Select-option.is-focused {
     background-color: #E10600 !important;
     color: #FFFFFF !important;
 }
-.f1-dropdown .Select-value-label {
-    color: #F5F5F5 !important;
+/* Arrow indicator */
+.f1-dropdown [class*="-indicatorContainer"] svg {
+    fill: #888888;
 }
-.f1-dropdown .Select-placeholder {
-    color: #888888 !important;
-}
-.f1-dropdown input {
-    color: #F5F5F5 !important;
+.f1-dropdown [class*="-indicatorSeparator"] {
+    background-color: #2A2A2A !important;
 }
 
-/* Scrollbar */
+/* ── Driver text input ─────────────────────────────────────────────────── */
+#input-driver {
+    background-color: #1C1C1C !important;
+    color: #F5F5F5 !important;
+    border: 1px solid #2A2A2A !important;
+    outline: none;
+}
+#input-driver:focus {
+    border-color: #E10600 !important;
+}
+
+/* ── Plotly modebar (zoom toolbar) ────────────────────────────────────── */
+.modebar {
+    background: rgba(22,22,22,0.85) !important;
+    border-radius: 4px;
+}
+.modebar-btn path {
+    fill: #888888 !important;
+}
+.modebar-btn:hover path {
+    fill: #E10600 !important;
+}
+.modebar-btn.active path {
+    fill: #E10600 !important;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: #161616; }
 ::-webkit-scrollbar-thumb { background: #E10600; border-radius: 3px; }
 
-/* Radio card animation */
-.radio-card {
-    animation: fadeIn 0.3s ease;
-}
+/* ── Radio card animation ──────────────────────────────────────────────── */
+.radio-card { animation: fadeIn 0.3s ease; }
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(8px); }
     to   { opacity: 1; transform: translateY(0);   }
 }
 
-/* Button hover */
-#btn-analyze:hover {
-    background-color: #B30500 !important;
-}
+/* ── Analyze button hover ──────────────────────────────────────────────── */
+#btn-analyze:hover { background-color: #B30500 !important; }
 
-/* Body background */
-body {
-    background-color: #0D0D0D;
-    margin: 0;
+/* ── Body ──────────────────────────────────────────────────────────────── */
+body { background-color: #0D0D0D; margin: 0; }
+
+/* ── Plotly unified hover label ────────────────────────────────────────── */
+.hoverlayer .unified-hover-label rect {
+    fill: #1C1C1C !important;
+    stroke: #2A2A2A !important;
+}
+.hoverlayer .unified-hover-label text {
+    fill: #F5F5F5 !important;
 }
