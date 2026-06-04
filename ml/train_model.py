@@ -101,7 +101,46 @@ def main():
     # ── 1. Load data ──────────────────────────────────────────────────────────
     csv_path = os.path.join(os.path.dirname(__file__), 'f1_all_seasons_training_data.csv')
     print(f"1. Loading training data from {csv_path}...")
-    df = pd.read_csv(csv_path).dropna(subset=['transcript'])
+    # The CSV contains two schemas: 13-col (2023) and 17-col (2024, with 4 extra
+    # numeric columns inserted after max_speed).  Read each schema separately and
+    # normalise to the 13-column layout before merging.
+    COLS_13 = ['year', 'location', 'driver', 'timestamp',
+               'avg_speed', 'max_speed', 'speed_variance',
+               'throttle_volatility', 'throttle_snaps', 'brake_switches',
+               'avg_rpm', 'max_rpm', 'transcript']
+    COLS_17 = ['year', 'location', 'driver', 'timestamp',
+               'avg_speed', 'max_speed', '_x1', '_x2', '_x3', '_x4',
+               'speed_variance', 'throttle_volatility', 'throttle_snaps',
+               'brake_switches', 'avg_rpm', 'max_rpm', 'transcript']
+
+    import csv as _csv
+    rows_13, rows_17 = [], []
+    with open(csv_path, newline='', encoding='utf-8') as fh:
+        reader = _csv.reader(fh)
+        next(reader)  # skip header
+        for row in reader:
+            n = len(row)
+            if n == 13:
+                rows_13.append(row)
+            elif n == 17:
+                rows_17.append(row)
+            # rows with any other width are silently skipped
+
+    frames = []
+    if rows_13:
+        frames.append(pd.DataFrame(rows_13, columns=COLS_13))
+    if rows_17:
+        wide = pd.DataFrame(rows_17, columns=COLS_17)
+        wide = wide.drop(columns=['_x1', '_x2', '_x3', '_x4'])
+        frames.append(wide)
+
+    df = pd.concat(frames, ignore_index=True)
+    # Cast numeric columns
+    for col in ['year', 'avg_speed', 'max_speed', 'speed_variance',
+                'throttle_volatility', 'throttle_snaps', 'brake_switches',
+                'avg_rpm', 'max_rpm']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    df = df.dropna(subset=['transcript'])
     print(f"   Loaded {len(df)} rows from {df['driver'].nunique()} drivers, "
           f"{df['location'].nunique()} locations, years {sorted(df['year'].unique())}")
 
