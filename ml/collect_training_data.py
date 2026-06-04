@@ -16,7 +16,7 @@ os.makedirs('cache', exist_ok=True)
 fastf1.Cache.enable_cache('cache')
 
 # OpenF1 data feeds began in 2023. We collect up to the current 2026 season.
-TARGET_YEARS = [2023, 2024, 2025, 2026]
+TARGET_YEARS = [ 2024, 2025, 2026]
 OUTPUT_CSV = "f1_all_seasons_training_data.csv"
 
 print("Loading Whisper AI Model (Medium)...")
