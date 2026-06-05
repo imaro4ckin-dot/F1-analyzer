@@ -64,6 +64,99 @@ def get_track_coords(session: fastf1.core.Session, driver_code: str) -> pd.DataF
     return pos[["Date", "X", "Y"]].dropna()
 
 
+def get_stint_data(session, driver_code: str) -> "pd.DataFrame":
+    """
+    Return per-lap stint/tyre information for a driver.
+    Columns: LapNumber (int), Compound (str), StintStart (datetime), StintEnd (datetime).
+    Uses FastF1's LapStartDate (already tz-naive absolute datetime) directly.
+    Returns empty DataFrame with those columns on any failure.
+    """
+    _empty = pd.DataFrame(columns=["LapNumber", "Compound", "StintStart", "StintEnd"])
+    try:
+        laps = session.laps.pick_drivers(driver_code).reset_index()
+        if laps.empty:
+            return _empty
+
+        laps_sorted = laps.sort_values("LapNumber").reset_index(drop=True)
+
+        # LapStartDate is already tz-naive absolute datetime in FastF1
+        rows = []
+        for i, row in laps_sorted.iterrows():
+            try:
+                lap_start = pd.Timestamp(row["LapStartDate"])
+                # Lap end = next lap's start; for last lap use LapTime if available
+                if i + 1 < len(laps_sorted):
+                    lap_end = pd.Timestamp(laps_sorted.loc[i + 1, "LapStartDate"])
+                else:
+                    lap_time = row.get("LapTime")
+                    if pd.notna(lap_time):
+                        lap_end = lap_start + pd.to_timedelta(lap_time)
+                    else:
+                        lap_end = lap_start + pd.Timedelta(seconds=120)  # fallback
+
+                compound = str(row.get("Compound", "UNKNOWN") or "UNKNOWN").upper()
+                rows.append({
+                    "LapNumber": int(row["LapNumber"]),
+                    "Compound": compound,
+                    "StintStart": lap_start,
+                    "StintEnd": lap_end,
+                })
+            except Exception:
+                continue
+
+        if not rows:
+            return _empty
+        return pd.DataFrame(rows)
+    except Exception:
+        return _empty
+
+
+def fetch_race_control(session_key: int) -> list:
+    """
+    Return SC/VSC race control events from OpenF1 for a session.
+    Each dict has: date (str ISO), category (str), message (str), flag (str).
+    Returns [] on any failure or if no SC/VSC events found.
+    """
+    url = f"https://api.openf1.org/v1/race_control?session_key={session_key}"
+    try:
+        data = requests.get(url, timeout=10).json()
+        if not isinstance(data, list):
+            return []
+        sc_keywords = {"safetycar", "vsc", "safety_car", "virtual_safety_car", "virtual safety car", "safety car"}
+        result = []
+        for item in data:
+            category = str(item.get("category", "")).lower()
+            flag = str(item.get("flag", "")).lower()
+            message = str(item.get("message", "")).lower()
+            if (category in sc_keywords
+                    or flag in sc_keywords
+                    or any(k in message for k in ("safety car", "virtual safety car", "safety car deployed",
+                                                   "safety car in this lap"))):
+                result.append({
+                    "date": item.get("date", ""),
+                    "category": item.get("category", ""),
+                    "message": item.get("message", ""),
+                    "flag": item.get("flag", ""),
+                })
+        return result
+    except Exception:
+        return []
+
+
+def get_all_driver_codes(session) -> list:
+    """Return sorted list of 3-letter driver abbreviations present in a session."""
+    codes = []
+    for num in session.drivers:
+        try:
+            info = session.get_driver(num)
+            abbr = info.get("Abbreviation")
+            if abbr:
+                codes.append(abbr)
+        except Exception:
+            continue
+    return sorted(set(codes))
+
+
 def fetch_radio(session_key: int, driver_num) -> list:
     """
     Return list of team radio message dicts from OpenF1.

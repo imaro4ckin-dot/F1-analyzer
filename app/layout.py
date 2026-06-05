@@ -12,6 +12,10 @@ WHITE = "#F5F5F5"
 GREY = "#888888"
 GREEN = "#39FF14"
 ORANGE = "#FF6B35"
+YELLOW = "#FFD700"
+TYRE_SOFT = "#E10600"
+TYRE_MEDIUM = "#FFF200"
+TYRE_HARD = "#F5F5F5"
 
 # ── Shared style helpers ─────────────────────────────────────────────────────
 LABEL_STYLE = {
@@ -25,7 +29,7 @@ LABEL_STYLE = {
 
 DROPDOWN_STYLE = {
     "backgroundColor": CARD,
-    "color": WHITE,
+    "color": RED,
     "border": f"1px solid {BORDER}",
     "borderRadius": "4px",
     "fontFamily": "'JetBrains Mono', 'Courier New', monospace",
@@ -112,6 +116,23 @@ def build_layout():
                                 **DROPDOWN_STYLE,
                                 "padding": "8px 12px",
                                 "width": "80px",
+                                "textTransform": "uppercase",
+                            },
+                        ),
+                    ]),
+
+                    html.Div([
+                        html.Div("VS DRIVER", style=LABEL_STYLE),
+                        dcc.Input(
+                            id="input-driver2",
+                            type="text",
+                            value="",
+                            maxLength=3,
+                            placeholder="VER (opt.)",
+                            style={
+                                **DROPDOWN_STYLE,
+                                "padding": "8px 12px",
+                                "width": "100px",
                                 "textTransform": "uppercase",
                             },
                         ),
@@ -212,6 +233,39 @@ def build_layout():
             # ── Radio panel ─────────────────────────────────────────────────
             html.Div(
                 id="radio-panel",
+                style={"padding": "0 32px 20px 32px"},
+                children=[],
+            ),
+
+            # ── Lap-by-lap stress breakdown ──────────────────────────────────
+            html.Div(
+                style={
+                    "padding": "0 32px 20px 32px",
+                },
+                children=[
+                    html.Div(
+                        style={
+                            "backgroundColor": CARD,
+                            "border": f"1px solid {BORDER}",
+                            "borderRadius": "6px",
+                            "padding": "16px",
+                        },
+                        children=[
+                            html.Div("LAP-BY-LAP STRESS BREAKDOWN", style={**LABEL_STYLE, "marginBottom": "8px"}),
+                            dcc.Graph(
+                                id="chart-lap-stress",
+                                config={"displayModeBar": False, "displaylogo": False},
+                                style={"height": "160px"},
+                                figure=_empty_figure(""),
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+
+            # ── Leaderboard panel ────────────────────────────────────────────
+            html.Div(
+                id="leaderboard-panel",
                 style={"padding": "0 32px 32px 32px"},
                 children=[],
             ),
@@ -219,6 +273,9 @@ def build_layout():
             # ── Hidden data stores ───────────────────────────────────────────
             dcc.Store(id="store-radio"),
             dcc.Store(id="store-session-meta"),
+            dcc.Store(id="store-lap-stress"),
+            dcc.Store(id="store-incidents"),
+            dcc.Store(id="store-leaderboard"),
         ],
     )
 

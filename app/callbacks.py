@@ -2,6 +2,7 @@ import sys
 import os
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -11,10 +12,16 @@ from dash.exceptions import PreventUpdate
 # Allow imports from project root
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from core.data_loader import fetch_races, load_session, get_driver_map, get_telemetry, get_track_coords, fetch_radio
-from core.predictor import load_model, predict_continuous, predict_at_timestamp
+from core.data_loader import (
+    fetch_races, load_session, get_driver_map, get_telemetry, get_track_coords,
+    fetch_radio, get_stint_data, fetch_race_control, get_all_driver_codes,
+)
+from core.predictor import load_model, predict_continuous, predict_at_timestamp, predict_anomaly_zscore
 from core.transcriber import transcribe_audio_url
-from app.layout import BG, SURFACE, CARD, BORDER, RED, RED_DIM, WHITE, GREY, GREEN, ORANGE, LABEL_STYLE
+from app.layout import (
+    BG, SURFACE, CARD, BORDER, RED, RED_DIM, WHITE, GREY, GREEN, ORANGE,
+    YELLOW, TYRE_SOFT, TYRE_MEDIUM, TYRE_HARD, LABEL_STYLE,
+)
 
 # ── Load ML model once at import time ───────────────────────────────────────
 _MODEL = None
@@ -66,80 +73,87 @@ def register_callbacks(app):
         Output("store-radio", "data"),
         Output("store-session-meta", "data"),
         Output("status-msg", "children"),
+        Output("store-lap-stress", "data"),
+        Output("store-incidents", "data"),
         Input("btn-analyze", "n_clicks"),
         State("dd-year", "value"),
         State("dd-race", "value"),
         State("input-driver", "value"),
+        State("input-driver2", "value"),
         prevent_initial_call=True,
     )
-    def run_analysis(n_clicks, year, race_location, driver_code):
+    def run_analysis(n_clicks, year, race_location, driver_code, driver_code2):
         if not all([year, race_location, driver_code]):
             raise PreventUpdate
 
         driver_code = driver_code.strip().upper()
+        driver_code2 = driver_code2.strip().upper() if driver_code2 and driver_code2.strip() else None
 
         # ── Load session ────────────────────────────────────────────────────
         try:
             session = load_session(int(year), race_location)
         except Exception as e:
-            return _err_fig(), _err_fig(), None, None, f"Session load failed: {e}"
+            return _err_fig(), _err_fig(), None, None, f"Session load failed: {e}", None, None
 
         driver_map = get_driver_map(session)
         if driver_code not in driver_map:
-            return _err_fig(), _err_fig(), None, None, f"Driver '{driver_code}' not found in this session."
+            return _err_fig(), _err_fig(), None, None, f"Driver '{driver_code}' not found.", None, None
 
         driver_num = driver_map[driver_code]
 
-        # ── Telemetry ───────────────────────────────────────────────────────
-        try:
-            tel = get_telemetry(session, driver_code)
-        except Exception as e:
-            return _err_fig(), _err_fig(), None, None, f"Telemetry error: {e}"
+        # ── Parallel: HTTP calls + local data extraction ─────────────────────
+        # fetch_races, fetch_race_control, get_telemetry, get_track_coords,
+        # get_stint_data are all independent — run concurrently.
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            f_races    = pool.submit(fetch_races, int(year))
+            f_tel      = pool.submit(get_telemetry, session, driver_code)
+            f_pos      = pool.submit(get_track_coords, session, driver_code)
+            f_stint    = pool.submit(get_stint_data, session, driver_code)
 
-        # ── Continuous AI stress curve ──────────────────────────────────────
+            races_result = f_races.result()
+            session_key = next(
+                (r["session_key"] for r in races_result if r["location"] == race_location), None
+            )
+
+            # Now we know session_key — fire the remaining HTTP calls
+            f_radio    = pool.submit(fetch_radio, session_key, driver_num) if session_key else None
+            f_rc       = pool.submit(fetch_race_control, session_key) if session_key else None
+
+            try:
+                tel = f_tel.result()
+            except Exception as e:
+                return _err_fig(), _err_fig(), None, None, f"Telemetry error: {e}", None, None
+
+            try:
+                pos = f_pos.result()
+            except Exception:
+                pos = pd.DataFrame(columns=["Date", "X", "Y"])
+
+            stint_data     = f_stint.result()
+            radio_messages = f_radio.result() if f_radio else []
+            incidents      = f_rc.result()   if f_rc   else []
+
+        # ── Model & stress driver 1 ─────────────────────────────────────────
         model = _get_model()
-
-        # ── Track position data ─────────────────────────────────────────────
-        try:
-            pos = get_track_coords(session, driver_code)
-        except Exception:
-            pos = pd.DataFrame(columns=["Date", "X", "Y"])
-
-        # ── Radio data ──────────────────────────────────────────────────────
-        races = fetch_races(int(year))
-        session_key = next((r["session_key"] for r in races if r["location"] == race_location), None)
-        radio_messages = fetch_radio(session_key, driver_num) if session_key else []
         has_radio = len(radio_messages) > 0
-
-        # Choose stress prediction mode based on radio availability
-        # With radio   → RF model (trained on radio-labelled kinematic data)
-        # Without radio → session z-score anomaly (no labels needed, self-calibrating)
         stress = predict_continuous(tel, model, use_anomaly=not has_radio)
         stress_mode = "RF Model" if has_radio else "Anomaly Z-Score"
 
-        # Build enriched radio records (stress + track position + transcript)
+        # ── Radio records driver 1 ──────────────────────────────────────────
         radio_records = []
         whisper_model = _get_whisper()
-
         for msg in radio_messages:
             radio_time = pd.to_datetime(msg["date"]).tz_localize(None)
             audio_url = msg.get("recording_url", "")
-
-            # Stress at this moment (always use RF model for per-event annotation)
             stress_val = predict_at_timestamp(tel, radio_time, model)
-
-            # Track position at this moment
             rx, ry = None, None
             if not pos.empty:
                 closest_pos_idx = (pos["Date"] - radio_time).abs().idxmin()
                 row = pos.loc[closest_pos_idx]
                 rx, ry = float(row["X"]), float(row["Y"])
-
-            # Transcribe
             transcript = ""
             if audio_url:
                 transcript = transcribe_audio_url(audio_url, driver_code, whisper_model)
-
             radio_records.append({
                 "time": str(radio_time),
                 "stress": stress_val,
@@ -147,19 +161,206 @@ def register_callbacks(app):
                 "transcript": transcript or "[engine static]",
                 "x": rx,
                 "y": ry,
+                "driver": "D1",
+                "code": driver_code,
             })
 
-        # ── Build telemetry figure ──────────────────────────────────────────
-        tel_fig = _build_telemetry_figure(tel, stress, radio_records, driver_code, stress_mode)
+        # ── Driver 2 (optional) ─────────────────────────────────────────────
+        tel2 = stress2 = pos2 = None
+        radio_records2 = []
+        if driver_code2 and driver_code2 in driver_map:
+            try:
+                driver_num2 = driver_map[driver_code2]
+                tel2 = get_telemetry(session, driver_code2)
+                try:
+                    pos2 = get_track_coords(session, driver_code2)
+                except Exception:
+                    pos2 = pd.DataFrame(columns=["Date", "X", "Y"])
+                radio_msgs2 = fetch_radio(session_key, driver_num2) if session_key else []
+                has_radio2 = len(radio_msgs2) > 0
+                stress2 = predict_continuous(tel2, model, use_anomaly=not has_radio2)
+                for msg in radio_msgs2:
+                    radio_time2 = pd.to_datetime(msg["date"]).tz_localize(None)
+                    audio_url2 = msg.get("recording_url", "")
+                    stress_val2 = predict_at_timestamp(tel2, radio_time2, model)
+                    rx2, ry2 = None, None
+                    if not pos2.empty:
+                        idx2 = (pos2["Date"] - radio_time2).abs().idxmin()
+                        row2 = pos2.loc[idx2]
+                        rx2, ry2 = float(row2["X"]), float(row2["Y"])
+                    transcript2 = ""
+                    if audio_url2:
+                        transcript2 = transcribe_audio_url(audio_url2, driver_code2, whisper_model)
+                    radio_records2.append({
+                        "time": str(radio_time2),
+                        "stress": stress_val2,
+                        "audio_url": audio_url2,
+                        "transcript": transcript2 or "[engine static]",
+                        "x": rx2,
+                        "y": ry2,
+                        "driver": "D2",
+                        "code": driver_code2,
+                    })
+            except Exception:
+                tel2 = stress2 = pos2 = None
+                radio_records2 = []
 
-        # ── Build track map figure ──────────────────────────────────────────
-        track_fig = _build_track_figure(pos, radio_records)
+        # ── Merge radio records ─────────────────────────────────────────────
+        all_radio = radio_records + radio_records2
+
+        # ── Lap stress breakdown ────────────────────────────────────────────
+        lap_stress_data = _compute_lap_stress(tel, stress, stint_data)
+        lap_store = {"driver_code": driver_code, "laps": lap_stress_data}
+
+        # ── Build figures ───────────────────────────────────────────────────
+        tel_fig = _build_telemetry_figure(
+            tel, stress, radio_records, driver_code, stress_mode,
+            tel2=tel2, stress2=stress2, radio_records2=radio_records2, driver_code2=driver_code2,
+            stint_data=stint_data, incidents=incidents,
+        )
+        track_fig = _build_track_figure(
+            pos, radio_records,
+            pos2=pos2, radio_records2=radio_records2, driver_code2=driver_code2,
+            incidents=incidents,
+        )
 
         meta = {"year": year, "location": race_location, "driver": driver_code}
-        status = f"{len(radio_records)} radio events  ·  {len(tel)} telemetry points  ·  AI: {stress_mode}"
-        return tel_fig, track_fig, radio_records, meta, status
+        d2_label = f"  ·  vs {driver_code2}" if driver_code2 else ""
+        status = (
+            f"{len(all_radio)} radio events  ·  {len(tel)} telemetry points  ·  "
+            f"AI: {stress_mode}{d2_label}"
+        )
+        return tel_fig, track_fig, all_radio, meta, status, lap_store, incidents
 
-    # ── 3. Show radio panel on marker click ─────────────────────────────────
+    # ── 3. Compute leaderboard separately (triggered after session meta ready) ─
+    @app.callback(
+        Output("store-leaderboard", "data"),
+        Input("store-session-meta", "data"),
+        State("dd-year", "value"),
+        State("dd-race", "value"),
+        prevent_initial_call=True,
+    )
+    def compute_leaderboard(meta, year, race_location):
+        if not meta or not year or not race_location:
+            raise PreventUpdate
+        try:
+            session = load_session(int(year), race_location)
+            model = _get_model()
+            return _compute_leaderboard(session, model)
+        except Exception:
+            return []
+
+    # ── 4. Lap bar chart ──────────────────────────────────────────────────────
+    @app.callback(
+        Output("chart-lap-stress", "figure"),
+        Input("store-lap-stress", "data"),
+        prevent_initial_call=True,
+    )
+    def update_lap_chart(lap_stress_data):
+        if not lap_stress_data or not lap_stress_data.get("laps"):
+            raise PreventUpdate
+        laps = lap_stress_data["laps"]
+        if not laps:
+            raise PreventUpdate
+
+        peak_lap = max(laps, key=lambda r: r["avg_stress"])["lap"]
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=[r["lap"] for r in laps],
+            y=[r["avg_stress"] for r in laps],
+            marker_color=[_stress_colour(r["avg_stress"]) for r in laps],
+            customdata=[r["lap"] for r in laps],
+            hovertemplate="Lap %{x}  ·  Stress %{y:.2f}/10<extra></extra>",
+            name="Avg Stress",
+        ))
+
+        # Highlight peak lap with a red border shape
+        fig.add_shape(
+            type="rect",
+            x0=peak_lap - 0.5, x1=peak_lap + 0.5,
+            y0=0, y1=10,
+            xref="x", yref="y",
+            line={"color": RED, "width": 2},
+            fillcolor="rgba(0,0,0,0)",
+        )
+
+        fig.add_annotation(
+            x=peak_lap, y=peak_lap and laps[peak_lap - 1]["avg_stress"] if peak_lap <= len(laps) else 10,
+            text="PEAK",
+            showarrow=False,
+            yshift=14,
+            font={"color": RED, "size": 9, "family": "JetBrains Mono, Courier New, monospace"},
+        )
+
+        fig.update_layout(
+            paper_bgcolor=CARD,
+            plot_bgcolor=CARD,
+            font={"color": WHITE, "family": "JetBrains Mono, Courier New, monospace", "size": 10},
+            margin={"l": 50, "r": 10, "t": 10, "b": 30},
+            xaxis={
+                "title": {"text": "Lap", "font": {"color": GREY, "size": 10}},
+                "gridcolor": BORDER, "zerolinecolor": BORDER,
+                "tickfont": {"color": GREY, "size": 9},
+                "dtick": 5,
+            },
+            yaxis={
+                "title": {"text": "Stress", "font": {"color": RED, "size": 10}},
+                "gridcolor": BORDER, "zerolinecolor": BORDER,
+                "tickfont": {"color": GREY, "size": 9},
+                "range": [0, 10.5],
+            },
+            showlegend=False,
+            hovermode="x",
+            bargap=0.2,
+        )
+        return fig
+
+    # ── 5. Clientside zoom: lap bar click → telemetry zoom ───────────────────
+    app.clientside_callback(
+        """
+        function(clickData, lapData) {
+            if (!clickData || !lapData || !lapData.laps) {
+                return window.dash_clientside.no_update;
+            }
+            var lapNum = clickData.points[0].customdata;
+            var laps = lapData.laps;
+            var entry = null;
+            for (var i = 0; i < laps.length; i++) {
+                if (laps[i].lap === lapNum) { entry = laps[i]; break; }
+            }
+            if (!entry) return window.dash_clientside.no_update;
+            var graphDiv = document.getElementById('chart-telemetry');
+            if (graphDiv && window.Plotly) {
+                Plotly.relayout(graphDiv, {
+                    'xaxis.range[0]': entry.start_time,
+                    'xaxis.range[1]': entry.end_time,
+                    'xaxis2.range[0]': entry.start_time,
+                    'xaxis2.range[1]': entry.end_time,
+                    'xaxis3.range[0]': entry.start_time,
+                    'xaxis3.range[1]': entry.end_time
+                });
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("chart-lap-stress", "id"),
+        Input("chart-lap-stress", "clickData"),
+        State("store-lap-stress", "data"),
+    )
+
+    # ── 6. Leaderboard display ────────────────────────────────────────────────
+    @app.callback(
+        Output("leaderboard-panel", "children"),
+        Input("store-leaderboard", "data"),
+        prevent_initial_call=True,
+    )
+    def update_leaderboard(leaderboard_data):
+        if not leaderboard_data:
+            raise PreventUpdate
+        return _build_leaderboard_panel(leaderboard_data)
+
+    # ── 7. Show radio panel on marker click ──────────────────────────────────
     @app.callback(
         Output("radio-panel", "children"),
         Input("chart-track", "clickData"),
@@ -171,7 +372,6 @@ def register_callbacks(app):
         if not radio_records:
             raise PreventUpdate
 
-        # Determine which chart fired and extract the custom data index
         click_data = track_click or tel_click
         if not click_data:
             raise PreventUpdate
@@ -182,17 +382,264 @@ def register_callbacks(app):
 
         point = points[0]
         custom = point.get("customdata")
-
-        # customdata is the index into radio_records list
         if custom is None:
             raise PreventUpdate
 
         idx = int(custom)
+        # radio_records holds the merged all_radio list (D1 + D2), so validate
+        # against its full length — D2 indices start at len(D1 records)
         if idx < 0 or idx >= len(radio_records):
             raise PreventUpdate
 
         rec = radio_records[idx]
         return _build_radio_panel(rec)
+
+
+# ── Internal helpers ─────────────────────────────────────────────────────────
+
+def _compute_lap_stress(tel: pd.DataFrame, stress: pd.Series, stint_data: pd.DataFrame) -> list:
+    """
+    Compute average stress per lap and return list of dicts for store-lap-stress.
+    Each dict: {lap, avg_stress, compound, start_time, end_time}.
+    """
+    results = []
+    if stint_data.empty or tel.empty:
+        return results
+    for _, row in stint_data.iterrows():
+        try:
+            start = pd.Timestamp(row["StintStart"])
+            end = pd.Timestamp(row["StintEnd"])
+            mask = (tel["Date"] >= start) & (tel["Date"] < end)
+            avg = float(stress[mask].mean()) if mask.any() else 5.0
+            if pd.isna(avg):
+                avg = 5.0
+            results.append({
+                "lap": int(row["LapNumber"]),
+                "avg_stress": round(avg, 2),
+                "compound": str(row["Compound"]),
+                "start_time": start.isoformat(),
+                "end_time": end.isoformat(),
+            })
+        except Exception:
+            continue
+    return sorted(results, key=lambda r: r["lap"])
+
+
+def _compute_leaderboard(session, model) -> list:
+    """
+    Compute stress metrics for every driver in the session.
+    Uses anomaly z-score with coarser step for speed.
+    Returns list sorted by avg_stress descending with rank assigned.
+    """
+    codes = get_all_driver_codes(session)
+    if not codes:
+        return []
+
+    def _driver_stress(code):
+        try:
+            tel = get_telemetry(session, code)
+            if tel.empty or len(tel) < 200:
+                return None
+            stress = predict_anomaly_zscore(tel, window=100, step=50)
+            avg = float(stress.mean())
+            max_s = float(stress.max())
+            n = len(stress)
+            step = max(1, n // 20)
+            sparkline = [round(float(v), 2) for v in stress.iloc[::step].values[:20]]
+            return {"code": code, "avg_stress": round(avg, 2), "max_stress": round(max_s, 2), "sparkline": sparkline}
+        except Exception:
+            return None
+
+    results = []
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {pool.submit(_driver_stress, c): c for c in codes}
+        for future in futures:
+            try:
+                result = future.result()
+            except Exception:
+                result = None
+            if result:
+                results.append(result)
+
+    results.sort(key=lambda r: r["avg_stress"], reverse=True)
+    for i, r in enumerate(results):
+        r["rank"] = i + 1
+    return results
+
+
+def _add_tyre_bands(fig, tel: pd.DataFrame, stint_data: pd.DataFrame):
+    """
+    Add tyre compound background bands to row 1 of the telemetry subplot.
+    Modifies fig in-place.
+    """
+    if stint_data.empty or tel.empty:
+        return
+
+    compound_colors = {
+        "SOFT":    "rgba(225,6,0,0.22)",
+        "MEDIUM":  "rgba(255,242,0,0.18)",
+        "HARD":    "rgba(245,245,245,0.13)",
+        "INTER":   "rgba(57,255,20,0.15)",
+        "WET":     "rgba(0,120,255,0.15)",
+    }
+    compound_legend_colors = {
+        "SOFT":   TYRE_SOFT,
+        "MEDIUM": TYRE_MEDIUM,
+        "HARD":   TYRE_HARD,
+        "INTER":  GREEN,
+        "WET":    "#0078FF",
+    }
+
+    # Group consecutive laps with same compound into single band
+    bands = []
+    prev_compound = None
+    band_start = None
+    for _, row in stint_data.sort_values("LapNumber").iterrows():
+        compound = row["Compound"]
+        if compound != prev_compound:
+            if prev_compound is not None and band_start is not None:
+                bands.append({"compound": prev_compound, "start": band_start, "end": row["StintStart"]})
+            prev_compound = compound
+            band_start = row["StintStart"]
+    if prev_compound and band_start is not None:
+        bands.append({"compound": prev_compound, "start": band_start, "end": stint_data["StintEnd"].max()})
+
+    shapes = list(fig.layout.shapes) if fig.layout.shapes else []
+    legend_compounds = set()
+
+    for band in bands:
+        color = compound_colors.get(band["compound"], "rgba(100,100,100,0.07)")
+        shapes.append(dict(
+            type="rect",
+            xref="x", yref="y domain",
+            x0=band["start"].isoformat() if hasattr(band["start"], "isoformat") else str(band["start"]),
+            x1=band["end"].isoformat() if hasattr(band["end"], "isoformat") else str(band["end"]),
+            y0=0, y1=1,
+            fillcolor=color,
+            line={"width": 0},
+            layer="below",
+        ))
+        legend_compounds.add(band["compound"])
+
+    fig.update_layout(shapes=shapes)
+
+    # Dummy legend traces for tyre compounds
+    for compound in sorted(legend_compounds):
+        lc = compound_legend_colors.get(compound, GREY)
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None],
+            mode="markers",
+            marker={"color": lc, "size": 10, "symbol": "square"},
+            name=f"{compound.capitalize()} tyre",
+            showlegend=True,
+        ), row=1, col=1)
+
+
+def _add_incident_bands(fig, incidents: list):
+    """
+    Add SC/VSC period background bands across all three subplot rows.
+    Modifies fig in-place.
+    """
+    if not incidents:
+        return
+
+    # Parse and sort by date
+    events = []
+    for item in incidents:
+        try:
+            dt = pd.to_datetime(item["date"])
+            if hasattr(dt, "tz") and dt.tz is not None:
+                dt = dt.tz_convert(None)
+            events.append({**item, "_dt": dt})
+        except Exception:
+            continue
+    events.sort(key=lambda e: e["_dt"])
+
+    # Pair DEPLOYED → WITHDRAWN (or next DEPLOYED as proxy end)
+    sc_periods = []
+    vsc_periods = []
+    i = 0
+    while i < len(events):
+        ev = events[i]
+        msg = ev.get("message", "").upper()
+        cat = ev.get("category", "").upper()
+        flag = ev.get("flag", "").upper()
+        is_sc = "SAFETY CAR" in msg and "VIRTUAL" not in msg
+        is_vsc = "VIRTUAL SAFETY CAR" in msg or "VSC" in cat
+        is_deployed = "DEPLOYED" in msg or "SAFETY CAR DEPLOYED" in msg or "SAFETY CAR OUT" in msg
+        is_withdrawn = "IN THIS LAP" in msg or "WITHDRAWN" in msg or "ENDING" in msg
+
+        if (is_sc or is_vsc) and (is_deployed or (not is_withdrawn)):
+            # Find end: next withdrawn or next deployment
+            end_dt = None
+            for j in range(i + 1, len(events)):
+                next_msg = events[j].get("message", "").upper()
+                if "IN THIS LAP" in next_msg or "WITHDRAWN" in next_msg:
+                    end_dt = events[j]["_dt"]
+                    break
+            if end_dt is None:
+                # No explicit WITHDRAWN event found — cap the period at 15 minutes
+                # to avoid a band spanning to the end of the race
+                end_dt = ev["_dt"] + pd.Timedelta(minutes=15)
+            if end_dt is None:
+                i += 1
+                continue
+            period = {"start": ev["_dt"], "end": end_dt}
+            if is_vsc:
+                vsc_periods.append(period)
+            else:
+                sc_periods.append(period)
+        i += 1
+
+    shapes = list(fig.layout.shapes) if fig.layout.shapes else []
+
+    # 3 xref axes for the 3 subplot rows
+    xrefs = ["x", "x2", "x3"]
+    for period in sc_periods:
+        x0 = period["start"].isoformat()
+        x1 = period["end"].isoformat()
+        for xref in xrefs:
+            shapes.append(dict(
+                type="rect",
+                xref=xref, yref="paper",
+                x0=x0, x1=x1,
+                y0=0, y1=1,
+                fillcolor="rgba(255,215,0,0.10)",
+                line={"color": YELLOW, "width": 1, "dash": "dot"},
+                layer="below",
+            ))
+
+    for period in vsc_periods:
+        x0 = period["start"].isoformat()
+        x1 = period["end"].isoformat()
+        for xref in xrefs:
+            shapes.append(dict(
+                type="rect",
+                xref=xref, yref="paper",
+                x0=x0, x1=x1,
+                y0=0, y1=1,
+                fillcolor="rgba(255,107,53,0.10)",
+                line={"color": ORANGE, "width": 1, "dash": "dot"},
+                layer="below",
+            ))
+
+    fig.update_layout(shapes=shapes)
+
+    # Legend entries
+    if sc_periods:
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="markers",
+            marker={"color": YELLOW, "size": 10, "symbol": "square"},
+            name="Safety Car",
+            showlegend=True,
+        ), row=1, col=1)
+    if vsc_periods:
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="markers",
+            marker={"color": ORANGE, "size": 10, "symbol": "square"},
+            name="VSC",
+            showlegend=True,
+        ), row=1, col=1)
 
 
 # ── Figure builders ──────────────────────────────────────────────────────────
@@ -217,13 +664,17 @@ def _err_fig():
     return _empty_figure("Error loading data")
 
 
-def _build_telemetry_figure(tel, stress, radio_records, driver_code, stress_mode="RF Model"):
+def _build_telemetry_figure(
+    tel, stress, radio_records, driver_code, stress_mode="RF Model",
+    tel2=None, stress2=None, radio_records2=None, driver_code2=None,
+    stint_data=None, incidents=None,
+):
     """
-    Three-row subplot layout to avoid y-axis overlap:
-      Row 1 (50%): Speed (white) + Brake dots (orange)
-      Row 2 (30%): AI Stress filled area (red)
-      Row 3 (20%): Throttle % (green)
-    Radio events appear as red vertical lines + clickable diamonds on all rows.
+    Three-row subplot:
+      Row 1 (50%): Speed + Brake dots [+ tyre bands + SC/VSC bands]
+      Row 2 (30%): AI Stress [+ driver 2 stress overlay]
+      Row 3 (20%): Throttle %
+    Radio events appear as dashed lines + clickable diamonds on row 1.
     """
     from plotly.subplots import make_subplots
 
@@ -237,32 +688,59 @@ def _build_telemetry_figure(tel, stress, radio_records, driver_code, stress_mode
 
     x = tel["Date"]
 
-    # ── Row 1: Speed ─────────────────────────────────────────────────────────
+    # ── Row 1: Speed ──────────────────────────────────────────────────────────
     fig.add_trace(go.Scatter(
         x=x, y=tel["Speed"],
-        name="Speed (km/h)",
-        line={"color": WHITE, "width": 1.8},
+        name=f"Speed {driver_code} (km/h)",
+        line={"color": WHITE, "width": 1.5},
         hovertemplate="Speed: %{y:.0f} km/h<extra></extra>",
     ), row=1, col=1)
 
+    # Brake: render as a filled-under area (0 = no brake, speed value = braking)
+    # This gives a clean "shade under the speed line when braking" effect instead
+    # of thousands of dots obscuring the trace.
     brake_mask = tel["Brake"].astype(bool)
+    brake_y = tel["Speed"].where(brake_mask, other=0)
     fig.add_trace(go.Scatter(
-        x=x[brake_mask], y=tel["Speed"][brake_mask],
+        x=x, y=brake_y,
         name="Braking",
-        mode="markers",
-        marker={"color": ORANGE, "size": 4, "symbol": "circle"},
-        hovertemplate="Brake @ %{y:.0f} km/h<extra></extra>",
+        fill="tozeroy",
+        fillcolor="rgba(255,107,53,0.35)",
+        line={"color": "rgba(255,107,53,0.0)", "width": 0},
+        hoverinfo="skip",
+        showlegend=True,
     ), row=1, col=1)
+
+    # Driver 2 speed overlay
+    if tel2 is not None and not tel2.empty:
+        fig.add_trace(go.Scatter(
+            x=tel2["Date"], y=tel2["Speed"],
+            name=f"Speed {driver_code2} (km/h)",
+            line={"color": ORANGE, "width": 1.2},
+            opacity=0.65,
+            hovertemplate=f"{driver_code2} Speed: %{{y:.0f}} km/h<extra></extra>",
+        ), row=1, col=1)
 
     # ── Row 2: AI Stress ──────────────────────────────────────────────────────
     fig.add_trace(go.Scatter(
         x=x, y=stress,
-        name=f"AI Stress [{stress_mode}]",
+        name=f"Stress {driver_code} [{stress_mode}]",
         fill="tozeroy",
-        fillcolor="rgba(225,6,0,0.18)",
-        line={"color": RED, "width": 2},
+        fillcolor="rgba(225,6,0,0.22)",
+        line={"color": RED, "width": 1.5},
         hovertemplate="Stress: %{y:.2f}/10<extra></extra>",
     ), row=2, col=1)
+
+    # Driver 2 stress overlay
+    if stress2 is not None and tel2 is not None:
+        fig.add_trace(go.Scatter(
+            x=tel2["Date"], y=stress2,
+            name=f"Stress {driver_code2}",
+            fill="tozeroy",
+            fillcolor="rgba(255,107,53,0.12)",
+            line={"color": ORANGE, "width": 1.5},
+            hovertemplate=f"{driver_code2} Stress: %{{y:.2f}}/10<extra></extra>",
+        ), row=2, col=1)
 
     # ── Row 3: Throttle ───────────────────────────────────────────────────────
     fig.add_trace(go.Scatter(
@@ -270,52 +748,23 @@ def _build_telemetry_figure(tel, stress, radio_records, driver_code, stress_mode
         name="Throttle %",
         line={"color": GREEN, "width": 1.2},
         fill="tozeroy",
-        fillcolor="rgba(57,255,20,0.08)",
+        fillcolor="rgba(57,255,20,0.12)",
         hovertemplate="Throttle: %{y:.0f}%<extra></extra>",
     ), row=3, col=1)
 
-    # ── Radio markers on all three rows ───────────────────────────────────────
-    for i, rec in enumerate(radio_records):
-        rt = pd.to_datetime(rec["time"])
-        transcript_short = rec["transcript"][:45] + ("…" if len(rec["transcript"]) > 45 else "")
+    # ── Radio markers: driver 1 ────────────────────────────────────────────────
+    _add_radio_markers(fig, tel, stress, radio_records, RED, WHITE, offset=0)
 
-        # Dashed line across all rows — add as a zero-width scatter instead of vline
-        # (vline in subplots requires string xref which is complex; scatter is simpler)
-        for row_num, y_col in ((1, tel["Speed"]), (2, stress), (3, tel["Throttle"])):
-            fig.add_trace(go.Scatter(
-                x=[rt, rt],
-                y=[float(y_col.min()), float(y_col.max())],
-                mode="lines",
-                line={"color": RED, "width": 1, "dash": "dash"},
-                opacity=0.45,
-                hoverinfo="skip",
-                showlegend=False,
-            ), row=row_num, col=1)
+    # ── Radio markers: driver 2 ────────────────────────────────────────────────
+    if radio_records2 and tel2 is not None:
+        _add_radio_markers(fig, tel2, stress2, radio_records2, ORANGE, WHITE, offset=len(radio_records))
 
-        # Clickable diamond on speed row (row 1)
-        # Find speed at this timestamp for y-position
-        closest_idx = (tel["Date"] - rt).abs().idxmin()
-        y_speed = float(tel["Speed"].loc[closest_idx])
-
-        fig.add_trace(go.Scatter(
-            x=[rt],
-            y=[y_speed],
-            mode="markers+text",
-            marker={"color": RED, "size": 11, "symbol": "diamond",
-                    "line": {"color": WHITE, "width": 1.5}},
-            text=[f"R{i+1}"],
-            textposition="top center",
-            textfont={"color": WHITE, "size": 9},
-            customdata=[i],
-            name=f"Radio",
-            hovertemplate=(
-                f"<b>Radio #{i+1}</b><br>"
-                f"{transcript_short}<br>"
-                f"Stress: {rec['stress']:.1f}/10"
-                "<extra></extra>"
-            ),
-            showlegend=False,
-        ), row=1, col=1)
+    # ── Tyre bands + incident bands AFTER traces so xaxis.type is auto "date" ─
+    fig.update_xaxes(type="date")
+    if stint_data is not None and not stint_data.empty:
+        _add_tyre_bands(fig, tel, stint_data)
+    if incidents:
+        _add_incident_bands(fig, incidents)
 
     # ── Layout ────────────────────────────────────────────────────────────────
     fig.update_layout(
@@ -336,7 +785,6 @@ def _build_telemetry_figure(tel, stress, radio_records, driver_code, stress_mode
         dragmode="zoom",
     )
 
-    # Shared x-axis bottom label
     fig.update_xaxes(
         gridcolor=BORDER, zerolinecolor=BORDER,
         tickfont={"color": GREY, "size": 10},
@@ -353,7 +801,6 @@ def _build_telemetry_figure(tel, stress, radio_records, driver_code, stress_mode
         showticklabels=True, row=3, col=1,
     )
 
-    # Y-axis labels — one per row, left side only
     fig.update_yaxes(
         title={"text": "km/h", "font": {"color": WHITE, "size": 10}},
         gridcolor=BORDER, zerolinecolor=BORDER,
@@ -375,13 +822,59 @@ def _build_telemetry_figure(tel, stress, radio_records, driver_code, stress_mode
         row=3, col=1,
     )
 
-    # Remove subplot title annotations (they show up as blank space otherwise)
     fig.update_annotations(font_size=0)
-
     return fig
 
 
-def _build_track_figure(pos, radio_records):
+def _add_radio_markers(fig, tel, stress, radio_records, marker_color, text_color, offset=0):
+    """Add dashed event lines + clickable diamonds for a set of radio records."""
+    for i, rec in enumerate(radio_records):
+        rt = pd.to_datetime(rec["time"])
+        transcript_short = rec["transcript"][:45] + ("…" if len(rec["transcript"]) > 45 else "")
+
+        # Thin dashed vertical line across all 3 rows using vline-style scatter
+        for row_num, y_col in ((1, tel["Speed"]), (2, stress), (3, tel["Throttle"])):
+            fig.add_trace(go.Scatter(
+                x=[rt, rt],
+                y=[float(y_col.min()), float(y_col.max())],
+                mode="lines",
+                line={"color": marker_color, "width": 0.8, "dash": "dot"},
+                opacity=0.30,
+                hoverinfo="skip",
+                showlegend=False,
+            ), row=row_num, col=1)
+
+        closest_idx = (tel["Date"] - rt).abs().idxmin()
+        y_speed = float(tel["Speed"].loc[closest_idx])
+        code = rec.get("code", "")
+        label = f"{code[:1]}{i+1}" if code else f"R{i+1}"
+
+        fig.add_trace(go.Scatter(
+            x=[rt],
+            y=[y_speed],
+            mode="markers+text",
+            marker={"color": marker_color, "size": 10, "symbol": "diamond",
+                    "line": {"color": text_color, "width": 1.2}},
+            text=[label],
+            textposition="top center",
+            textfont={"color": text_color, "size": 8},
+            customdata=[offset + i],
+            name="Radio",
+            hovertemplate=(
+                f"<b>Radio #{i+1} ({rec.get('code', '')})</b><br>"
+                f"{transcript_short}<br>"
+                f"Stress: {rec['stress']:.1f}/10"
+                "<extra></extra>"
+            ),
+            showlegend=False,
+        ), row=1, col=1)
+
+
+def _build_track_figure(
+    pos, radio_records,
+    pos2=None, radio_records2=None, driver_code2=None,
+    incidents=None,
+):
     fig = go.Figure()
     fig.update_layout(
         paper_bgcolor=CARD,
@@ -392,10 +885,35 @@ def _build_track_figure(pos, radio_records):
                "scaleanchor": "y", "scaleratio": 1},
         yaxis={"showgrid": False, "zeroline": False, "showticklabels": False},
         hovermode="closest",
-        showlegend=False,
+        showlegend=True,
+        legend={
+            "bgcolor": "rgba(0,0,0,0.5)",
+            "bordercolor": BORDER,
+            "font": {"size": 9, "color": WHITE},
+            "x": 0.01, "y": 0.99,
+        },
     )
 
-    # Track outline
+    # ── Driver 2 track (drawn first, underneath) ──────────────────────────────
+    if pos2 is not None and not pos2.empty:
+        fig.add_trace(go.Scatter(
+            x=pos2["X"], y=pos2["Y"],
+            mode="lines",
+            line={"color": "#3A2A1A", "width": 8},
+            hoverinfo="skip",
+            name=f"Track {driver_code2}",
+            showlegend=False,
+        ))
+        fig.add_trace(go.Scatter(
+            x=pos2["X"], y=pos2["Y"],
+            mode="lines",
+            line={"color": "#664422", "width": 2},
+            hoverinfo="skip",
+            name=f"Centre {driver_code2}",
+            showlegend=False,
+        ))
+
+    # ── Driver 1 track ────────────────────────────────────────────────────────
     if not pos.empty:
         fig.add_trace(go.Scatter(
             x=pos["X"], y=pos["Y"],
@@ -403,69 +921,97 @@ def _build_track_figure(pos, radio_records):
             line={"color": "#3A3A3A", "width": 8},
             hoverinfo="skip",
             name="Track",
+            showlegend=False,
         ))
-        # Thin white centre line
         fig.add_trace(go.Scatter(
             x=pos["X"], y=pos["Y"],
             mode="lines",
             line={"color": "#555555", "width": 2},
             hoverinfo="skip",
             name="Centre line",
-        ))
-
-    # Radio event markers
-    valid = [(i, r) for i, r in enumerate(radio_records) if r.get("x") is not None and r.get("y") is not None]
-    if valid:
-        xs = [r["x"] for _, r in valid]
-        ys = [r["y"] for _, r in valid]
-        indices = [i for i, _ in valid]
-        transcripts = [r["transcript"][:50] + ("…" if len(r["transcript"]) > 50 else "") for _, r in valid]
-        stresses = [r["stress"] for _, r in valid]
-        times = [pd.to_datetime(r["time"]).strftime("%H:%M:%S") for _, r in valid]
-
-        fig.add_trace(go.Scatter(
-            x=xs, y=ys,
-            mode="markers",
-            marker={
-                "color": [_stress_colour(s) for s in stresses],
-                "size": 14,
-                "symbol": "circle",
-                "line": {"color": WHITE, "width": 1.5},
-            },
-            customdata=indices,
-            hovertemplate=(
-                "<b>Radio Event</b><br>"
-                "Time: %{customdata}<br>"
-                "<extra></extra>"
-            ),
-            text=[f"{t}<br>{tr}" for t, tr in zip(times, transcripts)],
-            hovertext=[f"{t}  |  Stress {s:.1f}/10<br>{tr}" for t, s, tr in zip(times, stresses, transcripts)],
-            hoverinfo="text",
-            name="Radio",
-        ))
-
-        # Pulse ring around markers (outer glow effect)
-        fig.add_trace(go.Scatter(
-            x=xs, y=ys,
-            mode="markers",
-            marker={
-                "color": "rgba(0,0,0,0)",
-                "size": 22,
-                "symbol": "circle-open",
-                "line": {"color": RED, "width": 1},
-                "opacity": 0.4,
-            },
-            customdata=indices,
-            hoverinfo="skip",
             showlegend=False,
         ))
+
+    # ── SC/VSC legend entries on track map ────────────────────────────────────
+    if incidents:
+        has_sc = any("VIRTUAL" not in str(e.get("message", "")).upper()
+                     and "SAFETY CAR" in str(e.get("message", "")).upper()
+                     for e in incidents)
+        has_vsc = any("VIRTUAL SAFETY CAR" in str(e.get("message", "")).upper()
+                      for e in incidents)
+        if has_sc:
+            fig.add_trace(go.Scatter(
+                x=[None], y=[None], mode="markers",
+                marker={"color": YELLOW, "size": 10, "symbol": "square"},
+                name="Safety Car",
+            ))
+        if has_vsc:
+            fig.add_trace(go.Scatter(
+                x=[None], y=[None], mode="markers",
+                marker={"color": ORANGE, "size": 10, "symbol": "square"},
+                name="VSC",
+            ))
+
+    # ── Driver 1 radio markers ────────────────────────────────────────────────
+    _add_track_radio_markers(fig, radio_records, RED, WHITE, offset=0)
+
+    # ── Driver 2 radio markers ────────────────────────────────────────────────
+    if radio_records2 and pos2 is not None:
+        _add_track_radio_markers(fig, radio_records2, ORANGE, WHITE, offset=len(radio_records))
 
     return fig
 
 
+def _add_track_radio_markers(fig, radio_records, marker_color, text_color, offset=0):
+    """Add radio event dots on the track map for a set of records."""
+    valid = [(i, r) for i, r in enumerate(radio_records)
+             if r.get("x") is not None and r.get("y") is not None]
+    if not valid:
+        return
+
+    xs = [r["x"] for _, r in valid]
+    ys = [r["y"] for _, r in valid]
+    indices = [offset + i for i, _ in valid]
+    transcripts = [r["transcript"][:50] + ("…" if len(r["transcript"]) > 50 else "") for _, r in valid]
+    stresses = [r["stress"] for _, r in valid]
+    times = [pd.to_datetime(r["time"]).strftime("%H:%M:%S") for _, r in valid]
+
+    fig.add_trace(go.Scatter(
+        x=xs, y=ys,
+        mode="markers",
+        marker={
+            "color": [_stress_colour(s) for s in stresses],
+            "size": 14,
+            "symbol": "circle",
+            "line": {"color": text_color, "width": 1.5},
+        },
+        customdata=indices,
+        hovertext=[f"{t}  |  Stress {s:.1f}/10<br>{tr}" for t, s, tr in zip(times, stresses, transcripts)],
+        hoverinfo="text",
+        name="Radio",
+        showlegend=False,
+    ))
+
+    # Pulse ring
+    fig.add_trace(go.Scatter(
+        x=xs, y=ys,
+        mode="markers",
+        marker={
+            "color": "rgba(0,0,0,0)",
+            "size": 22,
+            "symbol": "circle-open",
+            "line": {"color": marker_color, "width": 1},
+            "opacity": 0.4,
+        },
+        customdata=indices,
+        hoverinfo="skip",
+        showlegend=False,
+    ))
+
+
 def _stress_colour(stress: float) -> str:
     """Map a stress score 1–10 to a colour between green and red."""
-    t = (stress - 1.0) / 9.0  # normalise to [0, 1]
+    t = (stress - 1.0) / 9.0
     t = max(0.0, min(1.0, t))
     r = int(39 + (225 - 39) * t)
     g = int(255 + (6 - 255) * t)
@@ -479,8 +1025,7 @@ def _build_radio_panel(rec):
     time_str = pd.to_datetime(rec["time"]).strftime("%H:%M:%S")
     transcript = rec["transcript"]
     audio_url = rec.get("audio_url", "")
-
-    # Stress bar (percentage of 10)
+    driver_label = rec.get("code", rec.get("driver", ""))
     bar_pct = int((stress / 10) * 100)
 
     return html.Div(
@@ -497,9 +1042,11 @@ def _build_radio_panel(rec):
             "flexWrap": "wrap",
         },
         children=[
-            # Left: metadata
             html.Div(style={"minWidth": "180px"}, children=[
-                html.Div("RADIO TRANSMISSION", style={**LABEL_STYLE, "marginBottom": "8px"}),
+                html.Div(
+                    f"RADIO  ·  {driver_label}" if driver_label else "RADIO TRANSMISSION",
+                    style={**LABEL_STYLE, "marginBottom": "8px"},
+                ),
                 html.Div(time_str, style={"color": WHITE, "fontSize": "24px", "fontWeight": "700",
                                          "letterSpacing": "0.1em"}),
                 html.Div(style={"marginTop": "12px"}, children=[
@@ -520,7 +1067,6 @@ def _build_radio_panel(rec):
                 ]),
             ]),
 
-            # Centre: transcript
             html.Div(style={"flex": "1", "minWidth": "200px"}, children=[
                 html.Div("TRANSCRIPT", style={**LABEL_STYLE, "marginBottom": "8px"}),
                 html.Div(
@@ -533,7 +1079,6 @@ def _build_radio_panel(rec):
                 ),
             ]),
 
-            # Right: audio player
             html.Div(style={"minWidth": "200px"}, children=[
                 html.Div("AUDIO", style={**LABEL_STYLE, "marginBottom": "8px"}),
                 html.Audio(
@@ -545,5 +1090,75 @@ def _build_radio_panel(rec):
                     },
                 ) if audio_url else html.Div("No audio available", style={"color": GREY, "fontSize": "11px"}),
             ]),
+        ],
+    )
+
+
+def _build_leaderboard_panel(leaderboard_data: list):
+    """Build the driver stress leaderboard HTML component."""
+    rows = []
+    for entry in leaderboard_data:
+        rank = entry["rank"]
+        code = entry["code"]
+        avg = entry["avg_stress"]
+        max_s = entry["max_stress"]
+        bar_pct = int((avg / 10) * 100)
+        stress_color = _stress_colour(avg)
+
+        rank_color = {1: YELLOW, 2: WHITE, 3: ORANGE}.get(rank, GREY)
+
+        rows.append(html.Div(
+            style={
+                "display": "flex",
+                "alignItems": "center",
+                "gap": "16px",
+                "padding": "8px 0",
+                "borderBottom": f"1px solid {BORDER}",
+            },
+            children=[
+                # Rank
+                html.Span(f"P{rank}", style={
+                    "color": rank_color, "fontSize": "11px", "fontWeight": "700",
+                    "minWidth": "28px", "letterSpacing": "0.05em",
+                }),
+                # Driver code
+                html.Span(code, style={
+                    "color": WHITE, "fontSize": "13px", "fontWeight": "700",
+                    "minWidth": "40px", "letterSpacing": "0.1em",
+                }),
+                # Stress bar
+                html.Div(style={"flex": "1", "minWidth": "80px", "maxWidth": "200px"}, children=[
+                    html.Div(style={
+                        "height": "4px", "width": "100%",
+                        "backgroundColor": BORDER, "borderRadius": "2px",
+                    }, children=[
+                        html.Div(style={
+                            "height": "4px", "width": f"{bar_pct}%",
+                            "backgroundColor": stress_color, "borderRadius": "2px",
+                        })
+                    ]),
+                ]),
+                # Avg stress value
+                html.Span(f"{avg:.1f}", style={
+                    "color": stress_color, "fontSize": "12px", "fontWeight": "700",
+                    "minWidth": "30px",
+                }),
+                # Max stress
+                html.Span(f"max {max_s:.1f}", style={
+                    "color": GREY, "fontSize": "10px", "letterSpacing": "0.05em",
+                }),
+            ],
+        ))
+
+    return html.Div(
+        style={
+            "backgroundColor": CARD,
+            "border": f"1px solid {BORDER}",
+            "borderRadius": "6px",
+            "padding": "16px 24px",
+        },
+        children=[
+            html.Div("DRIVER STRESS LEADERBOARD", style={**LABEL_STYLE, "marginBottom": "12px"}),
+            html.Div(rows),
         ],
     )

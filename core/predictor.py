@@ -92,11 +92,12 @@ def predict_continuous(
     """
     Predict stress across the full telemetry dataset.
 
-    If use_anomaly=True (no radio available), falls back to the session-relative
-    z-score method which requires no training labels and catches genuine anomalies
-    relative to THIS driver's own baseline in THIS race.
+    Uses vectorised batch prediction: all windows are extracted first, then
+    model.predict() is called once on the full feature matrix. This is ~100x
+    faster than calling predict() in a loop.
 
-    Otherwise uses the trained RF model.
+    If use_anomaly=True (no radio available), falls back to the session-relative
+    z-score method which requires no training labels.
     """
     if use_anomaly:
         return predict_anomaly_zscore(tel, window=window, step=step)
@@ -104,13 +105,26 @@ def predict_continuous(
     n = len(tel)
     scores = pd.Series(index=tel.index, dtype=float)
 
+    # Collect all window feature rows and their target positions in one pass
+    feature_rows = []
+    centers = []
     for i in range(window, n, step):
         tel_slice = tel.iloc[i - window: i]
-        features = extract_features(tel_slice)
-        raw = float(model.predict(features)[0])
-        center = i - step // 2
+        feature_rows.append(extract_features(tel_slice).iloc[0])
+        # Center of window [i-window : i] is at i - window//2
+        center = i - window // 2
+        centers.append(center)
+
+    if not feature_rows:
+        return scores.ffill().bfill()
+
+    # Single vectorised model.predict() call across all windows
+    X = pd.DataFrame(feature_rows).reset_index(drop=True)
+    preds = model.predict(X)
+
+    for center, raw in zip(centers, preds):
         if 0 <= center < n:
-            scores.iloc[center] = float(np.clip(round(raw, 2), 1.0, 10.0))
+            scores.iloc[center] = float(np.clip(round(float(raw), 2), 1.0, 10.0))
 
     return scores.ffill().bfill()
 
