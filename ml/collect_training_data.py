@@ -169,18 +169,17 @@ def main():
                     audio_url = msg['recording_url']
 
                     # Sync timing maps
-                    closest_tele_idx = (tel_driver['Date'] - msg_time).abs().argsort()[:1]
-                    if len(closest_tele_idx) == 0:
-                        continue
-
-                    idx = closest_tele_idx[0]
-                    telemetry_slice = tel_driver.loc[max(0, idx - 100):idx]
+                    closest_tele_idx = (tel_driver['Date'] - msg_time).abs().idxmin()
+                    loc = tel_driver.index.get_loc(closest_tele_idx)
+                    start = max(0, loc - 100)
+                    telemetry_slice = tel_driver.iloc[start: loc + 1]
 
                     features = extract_telemetry_features(telemetry_slice)
                     if not features:
                         continue
 
                     # Transcribe stream frames via temporary audio buffers
+                    temp_file_path = None
                     try:
                         audio_res = requests.get(audio_url, timeout=10)
                         if len(audio_res.content) < 1000:
@@ -197,6 +196,7 @@ def main():
                         )
                         transcript = result['text'].strip()
                         os.remove(temp_file_path)
+                        temp_file_path = None
 
                         # Filter empty entries or audio static hallucinations
                         if "speaking to engineer" in transcript or not transcript or len(transcript) < 3:
@@ -214,7 +214,7 @@ def main():
                         collected_rows.append(row_data)
 
                     except Exception:
-                        if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
+                        if temp_file_path and os.path.exists(temp_file_path):
                             os.remove(temp_file_path)
                         continue
 

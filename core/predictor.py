@@ -108,7 +108,9 @@ def predict_continuous(
         tel_slice = tel.iloc[i - window: i]
         features = extract_features(tel_slice)
         raw = float(model.predict(features)[0])
-        scores.iloc[i - step // 2] = float(np.clip(round(raw, 2), 1.0, 10.0))
+        center = i - step // 2
+        if 0 <= center < n:
+            scores.iloc[center] = float(np.clip(round(raw, 2), 1.0, 10.0))
 
     return scores.ffill().bfill()
 
@@ -123,8 +125,7 @@ def predict_at_timestamp(
     Predict stress using the `window` rows immediately before `radio_time`.
     Used to annotate individual radio events on the timeline.
     """
-    idx_pos = (tel["Date"] - radio_time).abs().argsort().iloc[0]
-    idx = tel.index[idx_pos]
+    idx = (tel["Date"] - radio_time).abs().idxmin()
     loc = tel.index.get_loc(idx)
     start = max(0, loc - window)
     tel_slice = tel.iloc[start: loc + 1]

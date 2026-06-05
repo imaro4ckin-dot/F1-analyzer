@@ -131,8 +131,8 @@ def register_callbacks(app):
             # Track position at this moment
             rx, ry = None, None
             if not pos.empty:
-                closest_pos_idx = (pos["Date"] - radio_time).abs().argsort().iloc[0]
-                row = pos.iloc[closest_pos_idx]
+                closest_pos_idx = (pos["Date"] - radio_time).abs().idxmin()
+                row = pos.loc[closest_pos_idx]
                 rx, ry = float(row["X"]), float(row["Y"])
 
             # Transcribe
@@ -282,7 +282,6 @@ def _build_telemetry_figure(tel, stress, radio_records, driver_code, stress_mode
         # Dashed line across all rows — add as a zero-width scatter instead of vline
         # (vline in subplots requires string xref which is complex; scatter is simpler)
         for row_num, y_col in ((1, tel["Speed"]), (2, stress), (3, tel["Throttle"])):
-            y_mid = float(y_col.median())
             fig.add_trace(go.Scatter(
                 x=[rt, rt],
                 y=[float(y_col.min()), float(y_col.max())],
@@ -295,8 +294,8 @@ def _build_telemetry_figure(tel, stress, radio_records, driver_code, stress_mode
 
         # Clickable diamond on speed row (row 1)
         # Find speed at this timestamp for y-position
-        closest_idx = (tel["Date"] - rt).abs().argsort().iloc[0]
-        y_speed = float(tel["Speed"].iloc[closest_idx])
+        closest_idx = (tel["Date"] - rt).abs().idxmin()
+        y_speed = float(tel["Speed"].loc[closest_idx])
 
         fig.add_trace(go.Scatter(
             x=[rt],
@@ -527,7 +526,7 @@ def _build_radio_panel(rec):
                 html.Div(
                     f'"{transcript}"',
                     style={
-                        "color": WHITE, "fontSize": "14px", "lineHeight": "1.6",
+                        "fontSize": "14px", "lineHeight": "1.6",
                         "fontStyle": "italic" if transcript != "[engine static]" else "normal",
                         "color": GREY if transcript == "[engine static]" else WHITE,
                     },

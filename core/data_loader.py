@@ -49,7 +49,7 @@ def get_telemetry(session: fastf1.core.Session, driver_code: str) -> pd.DataFram
     tel = session.laps.pick_drivers(driver_code).get_car_data()
     # Ensure Date column is timezone-naive for consistent timestamp arithmetic
     if hasattr(tel["Date"].dtype, "tz") and tel["Date"].dtype.tz is not None:
-        tel["Date"] = tel["Date"].dt.tz_localize(None)
+        tel["Date"] = tel["Date"].dt.tz_convert(None)
     return tel
 
 
@@ -60,11 +60,11 @@ def get_track_coords(session: fastf1.core.Session, driver_code: str) -> pd.DataF
     """
     pos = session.laps.pick_drivers(driver_code).get_pos_data()
     if hasattr(pos["Date"].dtype, "tz") and pos["Date"].dtype.tz is not None:
-        pos["Date"] = pos["Date"].dt.tz_localize(None)
+        pos["Date"] = pos["Date"].dt.tz_convert(None)
     return pos[["Date", "X", "Y"]].dropna()
 
 
-def fetch_radio(session_key: int, driver_num: str) -> list:
+def fetch_radio(session_key: int, driver_num) -> list:
     """
     Return list of team radio message dicts from OpenF1.
     Each dict has keys: date, recording_url.

@@ -8,6 +8,7 @@ def transcribe_audio_url(url: str, driver_code: str, model) -> str:
     Download an MP3 from `url`, transcribe it locally with Whisper, and return the transcript.
     Returns an empty string if audio is empty, corrupt, or contains only engine noise.
     """
+    tmp_path = None
     try:
         response = requests.get(url, timeout=10)
         if len(response.content) < 1000:
@@ -34,6 +35,7 @@ def transcribe_audio_url(url: str, driver_code: str, model) -> str:
 
         transcript = result["text"].strip()
         os.remove(tmp_path)
+        tmp_path = None
 
         # Suppress hallucinations where Whisper echoes back its own prompt
         if "speaking to race engineer" in transcript.lower() or len(transcript) < 3:
@@ -42,6 +44,6 @@ def transcribe_audio_url(url: str, driver_code: str, model) -> str:
         return transcript
 
     except Exception:
-        if "tmp_path" in dir() and os.path.exists(tmp_path):
+        if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
         return ""
