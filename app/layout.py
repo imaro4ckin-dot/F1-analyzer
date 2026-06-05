@@ -49,6 +49,33 @@ def _dropdown(id_, placeholder, options=None, value=None, clearable=False):
     )
 
 
+def _stat_chip(chip_id: str, label: str):
+    """Return a stats bar metric chip with a label and updatable value."""
+    return html.Div(
+        id=chip_id,
+        style={
+            "backgroundColor": CARD,
+            "border": f"1px solid {BORDER}",
+            "borderRadius": "6px",
+            "padding": "8px 16px",
+            "minWidth": "120px",
+            "display": "flex",
+            "flexDirection": "column",
+            "gap": "2px",
+        },
+        children=[
+            html.Div(label, style={**LABEL_STYLE, "marginBottom": "0"}),
+            html.Div("—", id=f"{chip_id}-val", style={
+                "color": WHITE,
+                "fontSize": "14px",
+                "fontWeight": "700",
+                "fontFamily": "'JetBrains Mono', 'Courier New', monospace",
+                "letterSpacing": "0.05em",
+            }),
+        ],
+    )
+
+
 def build_layout():
     return html.Div(
         style={"backgroundColor": BG, "minHeight": "100vh", "fontFamily": "'JetBrains Mono', 'Courier New', monospace"},
@@ -168,6 +195,27 @@ def build_layout():
                 ],
             ),
 
+            # ── Stats bar (hidden until analysis runs) ──────────────────────
+            html.Div(
+                id="stats-bar",
+                style={
+                    "backgroundColor": SURFACE,
+                    "borderBottom": f"1px solid {BORDER}",
+                    "padding": "10px 32px",
+                    "display": "none",
+                    "gap": "12px",
+                    "flexWrap": "wrap",
+                    "alignItems": "center",
+                },
+                children=[
+                    _stat_chip("chip-peak-stress",  "PEAK STRESS"),
+                    _stat_chip("chip-avg-stress",   "AVG STRESS"),
+                    _stat_chip("chip-fastest-lap",  "FASTEST LAP"),
+                    _stat_chip("chip-pit-stops",    "PIT STOPS"),
+                    _stat_chip("chip-radio-count",  "RADIO MSGS"),
+                ],
+            ),
+
             # ── Main content ────────────────────────────────────────────────
             html.Div(
                 style={"padding": "20px 32px", "display": "flex", "gap": "20px", "flexWrap": "wrap"},
@@ -237,26 +285,52 @@ def build_layout():
                 children=[],
             ),
 
-            # ── Lap-by-lap stress breakdown ──────────────────────────────────
+            # ── Lap charts: stress + lap time side-by-side ──────────────────
             html.Div(
-                style={
-                    "padding": "0 32px 20px 32px",
-                },
+                style={"padding": "0 32px 20px 32px"},
                 children=[
                     html.Div(
-                        style={
-                            "backgroundColor": CARD,
-                            "border": f"1px solid {BORDER}",
-                            "borderRadius": "6px",
-                            "padding": "16px",
-                        },
+                        style={"display": "flex", "gap": "20px", "flexWrap": "wrap"},
                         children=[
-                            html.Div("LAP-BY-LAP STRESS BREAKDOWN", style={**LABEL_STYLE, "marginBottom": "8px"}),
-                            dcc.Graph(
-                                id="chart-lap-stress",
-                                config={"displayModeBar": False, "displaylogo": False},
-                                style={"height": "160px"},
-                                figure=_empty_figure(""),
+                            # Left: Lap-by-lap stress
+                            html.Div(
+                                style={
+                                    "flex": "1",
+                                    "minWidth": "300px",
+                                    "backgroundColor": CARD,
+                                    "border": f"1px solid {BORDER}",
+                                    "borderRadius": "6px",
+                                    "padding": "16px",
+                                },
+                                children=[
+                                    html.Div("LAP-BY-LAP STRESS", style={**LABEL_STYLE, "marginBottom": "8px"}),
+                                    dcc.Graph(
+                                        id="chart-lap-stress",
+                                        config={"displayModeBar": False, "displaylogo": False},
+                                        style={"height": "160px"},
+                                        figure=_empty_figure(""),
+                                    ),
+                                ],
+                            ),
+                            # Right: Lap time evolution
+                            html.Div(
+                                style={
+                                    "flex": "1",
+                                    "minWidth": "300px",
+                                    "backgroundColor": CARD,
+                                    "border": f"1px solid {BORDER}",
+                                    "borderRadius": "6px",
+                                    "padding": "16px",
+                                },
+                                children=[
+                                    html.Div("LAP TIME EVOLUTION", style={**LABEL_STYLE, "marginBottom": "8px"}),
+                                    dcc.Graph(
+                                        id="chart-lap-times",
+                                        config={"displayModeBar": False, "displaylogo": False},
+                                        style={"height": "160px"},
+                                        figure=_empty_figure(""),
+                                    ),
+                                ],
                             ),
                         ],
                     ),
@@ -276,6 +350,7 @@ def build_layout():
             dcc.Store(id="store-lap-stress"),
             dcc.Store(id="store-incidents"),
             dcc.Store(id="store-leaderboard"),
+            dcc.Store(id="store-lap-times"),
         ],
     )
 

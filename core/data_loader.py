@@ -157,6 +157,58 @@ def get_all_driver_codes(session) -> list:
     return sorted(set(codes))
 
 
+def get_lap_times_data(session, driver_code: str) -> list:
+    """
+    Return per-lap timing data for the lap-time evolution chart.
+    Each dict: {lap, lap_time_s, compound, is_sc, is_vsc}.
+    Returns [] on any failure.
+    """
+    try:
+        laps = session.laps.pick_drivers(driver_code).sort_values("LapNumber")
+        result = []
+        for _, row in laps.iterrows():
+            lt = row.get("LapTime")
+            if pd.isna(lt):
+                continue
+            lap_s = lt.total_seconds()
+            if lap_s <= 0 or lap_s > 600:
+                continue
+            ts = str(row.get("TrackStatus", "1") or "1")
+            result.append({
+                "lap": int(row["LapNumber"]),
+                "lap_time_s": round(lap_s, 3),
+                "compound": str(row.get("Compound", "UNKNOWN") or "UNKNOWN").upper(),
+                "is_sc":  "4" in ts,
+                "is_vsc": "6" in ts,
+            })
+        return result
+    except Exception:
+        return []
+
+
+def get_pit_stops(session, driver_code: str) -> list:
+    """
+    Return list of pit-in absolute timestamps (tz-naive) for a driver.
+    Each dict: {lap (int), time (ISO string)}.
+    Uses PitInTime (timedelta offset from session start) + session.t0_date.
+    Returns [] on any failure.
+    """
+    try:
+        t0 = session.t0_date
+        if t0 is None:
+            return []
+        if hasattr(t0, "tz") and t0.tz is not None:
+            t0 = t0.tz_convert(None)
+        laps = session.laps.pick_drivers(driver_code)
+        pit_laps = laps[laps["PitInTime"].notna()].sort_values("LapNumber")
+        return [
+            {"lap": int(row["LapNumber"]), "time": (t0 + row["PitInTime"]).isoformat()}
+            for _, row in pit_laps.iterrows()
+        ]
+    except Exception:
+        return []
+
+
 def fetch_radio(session_key: int, driver_num) -> list:
     """
     Return list of team radio message dicts from OpenF1.

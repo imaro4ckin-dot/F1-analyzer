@@ -114,3 +114,27 @@ body { background-color: #0D0D0D; margin: 0; }
 .hoverlayer .unified-hover-label text {
     fill: #F5F5F5 !important;
 }
+
+/* ── Driver 2 text input ───────────────────────────────────────────────── */
+#input-driver2 {
+    background-color: #1C1C1C !important;
+    color: #F5F5F5 !important;
+    border: 1px solid #2A2A2A !important;
+    outline: none;
+}
+#input-driver2:focus {
+    border-color: #FF6B35 !important;   /* orange for driver 2 */
+}
+
+/* ── Stats bar chips ───────────────────────────────────────────────────── */
+#stats-bar > div {
+    transition: border-color 0.15s;
+}
+#stats-bar > div:hover {
+    border-color: #E10600 !important;
+}
+
+/* ── Lap time chart fade-in ────────────────────────────────────────────── */
+#chart-lap-times .js-plotly-plot {
+    animation: fadeIn 0.3s ease;
+}

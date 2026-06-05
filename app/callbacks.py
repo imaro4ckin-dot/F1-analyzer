@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from core.data_loader import (
     fetch_races, load_session, get_driver_map, get_telemetry, get_track_coords,
     fetch_radio, get_stint_data, fetch_race_control, get_all_driver_codes,
+    get_lap_times_data, get_pit_stops,
 )
 from core.predictor import load_model, predict_continuous, predict_at_timestamp, predict_anomaly_zscore
 from core.transcriber import transcribe_audio_url
@@ -60,9 +61,30 @@ def register_callbacks(app):
     def update_races(year):
         if not year:
             raise PreventUpdate
-        races = fetch_races(int(year))
-        options = [{"label": f"{r['country_name']}  ·  {r['location']}", "value": r["location"]}
-                   for r in races]
+        # Build options from FastF1 event schedule (local/cached, always works).
+        # Fall back to OpenF1 API if FastF1 schedule is unavailable.
+        options = []
+        try:
+            import fastf1
+            schedule = fastf1.get_event_schedule(int(year), include_testing=False)
+            for _, ev in schedule.iterrows():
+                loc = ev.get("Location") or ev.get("EventName", "")
+                country = ev.get("Country", "")
+                if not loc:
+                    continue
+                label = f"{country}  ·  {loc}" if country else loc
+                options.append({"label": label, "value": loc})
+        except Exception:
+            pass
+
+        if not options:
+            # OpenF1 fallback
+            races = fetch_races(int(year))
+            options = [
+                {"label": f"{r['country_name']}  ·  {r['location']}", "value": r["location"]}
+                for r in races
+            ]
+
         value = options[0]["value"] if options else None
         return options, value
 
@@ -75,6 +97,7 @@ def register_callbacks(app):
         Output("status-msg", "children"),
         Output("store-lap-stress", "data"),
         Output("store-incidents", "data"),
+        Output("store-lap-times", "data"),
         Input("btn-analyze", "n_clicks"),
         State("dd-year", "value"),
         State("dd-race", "value"),
@@ -93,36 +116,34 @@ def register_callbacks(app):
         try:
             session = load_session(int(year), race_location)
         except Exception as e:
-            return _err_fig(), _err_fig(), None, None, f"Session load failed: {e}", None, None
+            return _err_fig(), _err_fig(), None, None, f"Session load failed: {e}", None, None, None
 
         driver_map = get_driver_map(session)
         if driver_code not in driver_map:
-            return _err_fig(), _err_fig(), None, None, f"Driver '{driver_code}' not found.", None, None
+            return _err_fig(), _err_fig(), None, None, f"Driver '{driver_code}' not found.", None, None, None
 
         driver_num = driver_map[driver_code]
 
         # ── Parallel: HTTP calls + local data extraction ─────────────────────
-        # fetch_races, fetch_race_control, get_telemetry, get_track_coords,
-        # get_stint_data are all independent — run concurrently.
+        # Get session_key from already-loaded FastF1 session (no OpenF1 call needed)
+        try:
+            session_key = int(session.session_info["Key"])
+        except Exception:
+            session_key = None
+
         with ThreadPoolExecutor(max_workers=6) as pool:
-            f_races    = pool.submit(fetch_races, int(year))
             f_tel      = pool.submit(get_telemetry, session, driver_code)
             f_pos      = pool.submit(get_track_coords, session, driver_code)
             f_stint    = pool.submit(get_stint_data, session, driver_code)
 
-            races_result = f_races.result()
-            session_key = next(
-                (r["session_key"] for r in races_result if r["location"] == race_location), None
-            )
-
-            # Now we know session_key — fire the remaining HTTP calls
+            # Fire HTTP calls now that we have session_key
             f_radio    = pool.submit(fetch_radio, session_key, driver_num) if session_key else None
             f_rc       = pool.submit(fetch_race_control, session_key) if session_key else None
 
             try:
                 tel = f_tel.result()
             except Exception as e:
-                return _err_fig(), _err_fig(), None, None, f"Telemetry error: {e}", None, None
+                return _err_fig(), _err_fig(), None, None, f"Telemetry error: {e}", None, None, None
 
             try:
                 pos = f_pos.result()
@@ -210,13 +231,38 @@ def register_callbacks(app):
 
         # ── Lap stress breakdown ────────────────────────────────────────────
         lap_stress_data = _compute_lap_stress(tel, stress, stint_data)
-        lap_store = {"driver_code": driver_code, "laps": lap_stress_data}
+
+        # ── Fastest lap / pit stops / lap times ─────────────────────────────
+        fastest_lap_band = _get_fastest_lap_band(session, driver_code)
+        pit_stops        = get_pit_stops(session, driver_code)
+        lap_times_data   = get_lap_times_data(session, driver_code)
+
+        # Format fastest lap as M:SS.sss for stats bar
+        fl_str = "—"
+        if fastest_lap_band:
+            lt_s = fastest_lap_band["lap_time_s"]
+            fl_str = f"{int(lt_s // 60)}:{lt_s % 60:06.3f}"
+
+        stress_vals = [r["avg_stress"] for r in lap_stress_data]
+        lap_store = {
+            "driver_code": driver_code,
+            "laps": lap_stress_data,
+            "fastest_lap_num": fastest_lap_band.get("lap_num") if fastest_lap_band else None,
+            "stats": {
+                "peak_stress":  round(max(stress_vals, default=0.0), 1),
+                "avg_stress":   round(sum(stress_vals) / len(stress_vals), 1) if stress_vals else 0.0,
+                "fastest_lap":  fl_str,
+                "pit_stops":    len(pit_stops),
+                "radio_count":  len(all_radio),
+            },
+        }
 
         # ── Build figures ───────────────────────────────────────────────────
         tel_fig = _build_telemetry_figure(
             tel, stress, radio_records, driver_code, stress_mode,
             tel2=tel2, stress2=stress2, radio_records2=radio_records2, driver_code2=driver_code2,
             stint_data=stint_data, incidents=incidents,
+            pit_stops=pit_stops, fastest_lap_band=fastest_lap_band,
         )
         track_fig = _build_track_figure(
             pos, radio_records,
@@ -230,7 +276,7 @@ def register_callbacks(app):
             f"{len(all_radio)} radio events  ·  {len(tel)} telemetry points  ·  "
             f"AI: {stress_mode}{d2_label}"
         )
-        return tel_fig, track_fig, all_radio, meta, status, lap_store, incidents
+        return tel_fig, track_fig, all_radio, meta, status, lap_store, incidents, lap_times_data
 
     # ── 3. Compute leaderboard separately (triggered after session meta ready) ─
     @app.callback(
@@ -293,21 +339,43 @@ def register_callbacks(app):
             font={"color": RED, "size": 9, "family": "JetBrains Mono, Courier New, monospace"},
         )
 
+        # Fastest lap badge — green border + label (only if different from peak stress lap)
+        fastest_lap_num = lap_stress_data.get("fastest_lap_num")
+        if fastest_lap_num and fastest_lap_num != peak_lap:
+            fl_entry = next((r for r in laps if r["lap"] == fastest_lap_num), None)
+            if fl_entry:
+                fig.add_shape(
+                    type="rect",
+                    x0=fastest_lap_num - 0.5, x1=fastest_lap_num + 0.5,
+                    y0=0, y1=10,
+                    xref="x", yref="y",
+                    line={"color": GREEN, "width": 2},
+                    fillcolor="rgba(57,255,20,0.08)",
+                )
+                fig.add_annotation(
+                    x=fastest_lap_num, y=fl_entry["avg_stress"],
+                    text="FASTEST",
+                    showarrow=False,
+                    yshift=14,
+                    font={"color": GREEN, "size": 9,
+                          "family": "JetBrains Mono, Courier New, monospace"},
+                )
+
         fig.update_layout(
             paper_bgcolor=CARD,
             plot_bgcolor=CARD,
             font={"color": WHITE, "family": "JetBrains Mono, Courier New, monospace", "size": 10},
             margin={"l": 50, "r": 10, "t": 10, "b": 30},
             xaxis={
-                "title": {"text": "Lap", "font": {"color": GREY, "size": 10}},
-                "gridcolor": BORDER, "zerolinecolor": BORDER,
-                "tickfont": {"color": GREY, "size": 9},
+                "title": {"text": "Lap", "font": {"color": GREY, "size": 11}},
+                "gridcolor": "#333333", "griddash": "dot", "zerolinecolor": BORDER,
+                "tickfont": {"color": GREY, "size": 10},
                 "dtick": 5,
             },
             yaxis={
-                "title": {"text": "Stress", "font": {"color": RED, "size": 10}},
-                "gridcolor": BORDER, "zerolinecolor": BORDER,
-                "tickfont": {"color": GREY, "size": 9},
+                "title": {"text": "Stress Score", "font": {"color": RED, "size": 11}},
+                "gridcolor": "#333333", "griddash": "dot", "zerolinecolor": BORDER,
+                "tickfont": {"color": GREY, "size": 10},
                 "range": [0, 10.5],
             },
             showlegend=False,
@@ -360,7 +428,62 @@ def register_callbacks(app):
             raise PreventUpdate
         return _build_leaderboard_panel(leaderboard_data)
 
-    # ── 7. Show radio panel on marker click ──────────────────────────────────
+    # ── 7. Lap time evolution chart ───────────────────────────────────────────
+    @app.callback(
+        Output("chart-lap-times", "figure"),
+        Input("store-lap-times", "data"),
+        prevent_initial_call=True,
+    )
+    def update_lap_time_chart(lap_times_data):
+        if not lap_times_data:
+            raise PreventUpdate
+        return _build_lap_time_figure(lap_times_data)
+
+    # ── 8. Stats bar ──────────────────────────────────────────────────────────
+    @app.callback(
+        Output("stats-bar", "style"),
+        Output("chip-peak-stress-val", "children"),
+        Output("chip-peak-stress-val", "style"),
+        Output("chip-avg-stress-val", "children"),
+        Output("chip-fastest-lap-val", "children"),
+        Output("chip-pit-stops-val", "children"),
+        Output("chip-radio-count-val", "children"),
+        Input("store-lap-stress", "data"),
+        prevent_initial_call=True,
+    )
+    def update_stats_bar(lap_stress_data):
+        if not lap_stress_data or not lap_stress_data.get("stats"):
+            raise PreventUpdate
+        stats = lap_stress_data["stats"]
+        base_val_style = {
+            "color": WHITE,
+            "fontSize": "14px",
+            "fontWeight": "700",
+            "fontFamily": "'JetBrains Mono', 'Courier New', monospace",
+            "letterSpacing": "0.05em",
+        }
+        peak = stats["peak_stress"]
+        peak_color = RED if peak >= 7.0 else (ORANGE if peak >= 5.0 else GREEN)
+        stats_bar_style = {
+            "backgroundColor": SURFACE,
+            "borderBottom": f"1px solid {BORDER}",
+            "padding": "10px 32px",
+            "display": "flex",
+            "gap": "12px",
+            "flexWrap": "wrap",
+            "alignItems": "center",
+        }
+        return (
+            stats_bar_style,
+            f"{peak:.1f}/10",
+            {**base_val_style, "color": peak_color},
+            f"{stats['avg_stress']:.1f}/10",
+            stats["fastest_lap"],
+            str(stats["pit_stops"]),
+            str(stats["radio_count"]),
+        )
+
+    # ── 9. Show radio panel on marker click ──────────────────────────────────
     @app.callback(
         Output("radio-panel", "children"),
         Input("chart-track", "clickData"),
@@ -396,6 +519,257 @@ def register_callbacks(app):
 
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
+
+def _get_fastest_lap_band(session, driver_code: str):
+    """
+    Return fastest lap timing as a dict for telemetry band overlay.
+    Keys: start_iso, end_iso, lap_num, lap_time_s.
+    Returns None on any failure.
+    """
+    try:
+        lap = session.laps.pick_drivers(driver_code).pick_fastest()
+        if lap is None:
+            return None
+        start = pd.Timestamp(lap["LapStartDate"])
+        if hasattr(start, "tz") and start.tz is not None:
+            start = start.tz_convert(None)
+        lt = lap["LapTime"]
+        if pd.isna(lt):
+            return None
+        return {
+            "start_iso": start.isoformat(),
+            "end_iso":   (start + lt).isoformat(),
+            "lap_num":   int(lap["LapNumber"]),
+            "lap_time_s": lt.total_seconds(),
+        }
+    except Exception:
+        return None
+
+
+def _add_fastest_lap_band(fig, band: dict):
+    """Add a green vertical band across all 3 subplot rows for the fastest lap."""
+    if not band:
+        return
+    x0, x1 = band["start_iso"], band["end_iso"]
+    shapes = list(fig.layout.shapes) if fig.layout.shapes else []
+    for xref in ("x", "x2", "x3"):
+        shapes.append(dict(
+            type="rect",
+            xref=xref, yref="paper",
+            x0=x0, x1=x1,
+            y0=0, y1=1,
+            fillcolor="rgba(57,255,20,0.10)",
+            line={"color": GREEN, "width": 1, "dash": "dot"},
+            layer="below",
+        ))
+    fig.update_layout(shapes=shapes)
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None], mode="markers",
+        marker={"color": GREEN, "size": 10, "symbol": "square"},
+        name="Fastest Lap",
+        showlegend=True,
+    ), row=1, col=1)
+
+
+def _add_pit_stop_markers(fig, pit_stops: list):
+    """Add dashed white vertical lines + PIT labels on row 1 for each pit stop."""
+    if not pit_stops:
+        return
+    shapes = list(fig.layout.shapes) if fig.layout.shapes else []
+    for stop in pit_stops:
+        t_iso = stop["time"]
+        shapes.append(dict(
+            type="line",
+            xref="x", yref="y domain",
+            x0=t_iso, x1=t_iso,
+            y0=0, y1=1,
+            line={"color": "rgba(245,245,245,0.6)", "width": 1.5, "dash": "dash"},
+        ))
+    fig.update_layout(shapes=shapes)
+    for stop in pit_stops:
+        fig.add_annotation(
+            x=stop["time"],
+            y=1.0,
+            xref="x",
+            yref="paper",
+            text=f"PIT L{stop['lap']}",
+            showarrow=False,
+            yanchor="top",
+            font={"color": WHITE, "size": 8,
+                  "family": "JetBrains Mono, Courier New, monospace"},
+            opacity=0.75,
+            bgcolor="rgba(22,22,22,0.7)",
+            borderpad=2,
+            xanchor="center",
+        )
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None], mode="lines",
+        line={"color": WHITE, "width": 1.5, "dash": "dash"},
+        name="Pit Stop",
+        showlegend=True,
+    ), row=1, col=1)
+
+
+def _add_drs_zones(fig, tel: pd.DataFrame):
+    """
+    Shade DRS activation zones on the top strip of the speed subplot (row 1).
+    Derives zones from DRS==8 telemetry channel; consecutive samples are merged
+    into bands (gap threshold 0.5 s). Fails silently on any error.
+    """
+    try:
+        if "DRS" not in tel.columns or tel.empty:
+            return
+        drs_open = tel[tel["DRS"] == 8].copy()
+        if drs_open.empty:
+            return
+
+        GAP = pd.Timedelta(seconds=0.5)
+        bands = []
+        band_start = prev_time = None
+        for _, row in drs_open.iterrows():
+            t = row["Date"]
+            if band_start is None:
+                band_start = t
+            elif prev_time is not None and (t - prev_time) > GAP:
+                bands.append({"start": band_start, "end": prev_time})
+                band_start = t
+            prev_time = t
+        if band_start and prev_time:
+            bands.append({"start": band_start, "end": prev_time})
+
+        if not bands:
+            return
+
+        shapes = list(fig.layout.shapes) if fig.layout.shapes else []
+        for band in bands:
+            shapes.append(dict(
+                type="rect",
+                xref="x", yref="y domain",
+                x0=band["start"].isoformat(),
+                x1=band["end"].isoformat(),
+                y0=0.84, y1=1.0,
+                fillcolor="rgba(255,215,0,0.08)",
+                line={"width": 0},
+                layer="below",
+            ))
+        fig.update_layout(shapes=shapes)
+
+        # Label only on first DRS zone to avoid clutter
+        fig.add_annotation(
+            x=bands[0]["start"].isoformat(),
+            y=1.0,
+            xref="x", yref="paper",
+            text="DRS",
+            showarrow=False,
+            yanchor="top",
+            font={"color": YELLOW, "size": 7,
+                  "family": "JetBrains Mono, Courier New, monospace"},
+            opacity=0.65,
+            xanchor="left",
+        )
+    except Exception:
+        pass
+
+
+def _build_lap_time_figure(lap_times_data: list):
+    """
+    Line + scatter chart of lap time per lap.
+    Compound-colored dots; SC laps = square, VSC = diamond, normal = circle.
+    Y-axis formatted as M:SS.ss.
+    """
+    if not lap_times_data:
+        from app.layout import _empty_figure
+        return _empty_figure("")
+
+    COMPOUND_COLORS = {
+        "SOFT":    TYRE_SOFT,
+        "MEDIUM":  TYRE_MEDIUM,
+        "HARD":    TYRE_HARD,
+        "INTER":   GREEN,
+        "WET":     "#0078FF",
+        "UNKNOWN": GREY,
+    }
+
+    laps_x    = [r["lap"]        for r in lap_times_data]
+    times_y   = [r["lap_time_s"] for r in lap_times_data]
+    compounds = [r["compound"]   for r in lap_times_data]
+
+    dot_colors  = [COMPOUND_COLORS.get(c, GREY) for c in compounds]
+    dot_symbols = []
+    for r in lap_times_data:
+        if r["is_sc"]:   dot_symbols.append("square")
+        elif r["is_vsc"]: dot_symbols.append("diamond")
+        else:             dot_symbols.append("circle")
+
+    hover_texts = []
+    for r in lap_times_data:
+        lt = r["lap_time_s"]
+        m, s = int(lt // 60), lt % 60
+        flag = " [SC]" if r["is_sc"] else (" [VSC]" if r["is_vsc"] else "")
+        hover_texts.append(f"Lap {r['lap']}: {m}:{s:06.3f}{flag}<br>{r['compound'].capitalize()}")
+
+    fig = go.Figure()
+
+    # Thin connector line
+    fig.add_trace(go.Scatter(
+        x=laps_x, y=times_y,
+        mode="lines",
+        line={"color": BORDER, "width": 1},
+        hoverinfo="skip",
+        showlegend=False,
+    ))
+
+    # Compound-colored dots
+    fig.add_trace(go.Scatter(
+        x=laps_x, y=times_y,
+        mode="markers",
+        marker={
+            "color": dot_colors,
+            "size": 7,
+            "symbol": dot_symbols,
+            "line": {"color": SURFACE, "width": 1},
+        },
+        hovertext=hover_texts,
+        hoverinfo="text",
+        showlegend=False,
+    ))
+
+    # Y-axis ticks as M:SS.ss
+    if times_y:
+        y_min = min(times_y) * 0.995
+        y_max = max(times_y) * 1.005
+        n_ticks = 5
+        step = (y_max - y_min) / (n_ticks - 1)
+        tick_vals = [y_min + i * step for i in range(n_ticks)]
+        tick_texts = [f"{int(tv//60)}:{tv%60:05.2f}" for tv in tick_vals]
+    else:
+        y_min, y_max = 60, 120
+        tick_vals, tick_texts = [], []
+
+    fig.update_layout(
+        paper_bgcolor=CARD,
+        plot_bgcolor=CARD,
+        font={"color": WHITE, "family": "JetBrains Mono, Courier New, monospace", "size": 10},
+        margin={"l": 70, "r": 10, "t": 10, "b": 30},
+        xaxis={
+            "title": {"text": "Lap", "font": {"color": GREY, "size": 11}},
+            "gridcolor": "#333333", "griddash": "dot", "zerolinecolor": BORDER,
+            "tickfont": {"color": GREY, "size": 10},
+            "dtick": 5,
+        },
+        yaxis={
+            "title": {"text": "Lap Time", "font": {"color": GREY, "size": 11}},
+            "gridcolor": "#333333", "griddash": "dot", "zerolinecolor": BORDER,
+            "tickfont": {"color": GREY, "size": 10},
+            "tickvals": tick_vals,
+            "ticktext": tick_texts,
+            "range": [y_min, y_max],
+        },
+        showlegend=False,
+        hovermode="closest",
+    )
+    return fig
+
 
 def _compute_lap_stress(tel: pd.DataFrame, stress: pd.Series, stint_data: pd.DataFrame) -> list:
     """
@@ -668,6 +1042,7 @@ def _build_telemetry_figure(
     tel, stress, radio_records, driver_code, stress_mode="RF Model",
     tel2=None, stress2=None, radio_records2=None, driver_code2=None,
     stint_data=None, incidents=None,
+    pit_stops=None, fastest_lap_band=None,
 ):
     """
     Three-row subplot:
@@ -683,7 +1058,6 @@ def _build_telemetry_figure(
         shared_xaxes=True,
         row_heights=[0.50, 0.30, 0.20],
         vertical_spacing=0.03,
-        subplot_titles=("", "", ""),
     )
 
     x = tel["Date"]
@@ -765,6 +1139,12 @@ def _build_telemetry_figure(
         _add_tyre_bands(fig, tel, stint_data)
     if incidents:
         _add_incident_bands(fig, incidents)
+    # New feature overlays (must come after xaxis type is set)
+    if fastest_lap_band:
+        _add_fastest_lap_band(fig, fastest_lap_band)
+    if pit_stops:
+        _add_pit_stop_markers(fig, pit_stops)
+    _add_drs_zones(fig, tel)
 
     # ── Layout ────────────────────────────────────────────────────────────────
     fig.update_layout(
@@ -802,27 +1182,26 @@ def _build_telemetry_figure(
     )
 
     fig.update_yaxes(
-        title={"text": "km/h", "font": {"color": WHITE, "size": 10}},
-        gridcolor=BORDER, zerolinecolor=BORDER,
+        title={"text": "Speed (km/h)", "font": {"color": WHITE, "size": 11}},
+        gridcolor="#333333", griddash="dot", zerolinecolor=BORDER,
         tickfont={"color": GREY, "size": 10},
         row=1, col=1,
     )
     fig.update_yaxes(
-        title={"text": "Stress", "font": {"color": RED, "size": 10}},
+        title={"text": "Stress Score", "font": {"color": RED, "size": 11}},
         range=[0, 10],
-        gridcolor=BORDER, zerolinecolor=BORDER,
+        gridcolor="#333333", griddash="dot", zerolinecolor=BORDER,
         tickfont={"color": RED, "size": 10},
         row=2, col=1,
     )
     fig.update_yaxes(
-        title={"text": "Throttle %", "font": {"color": GREEN, "size": 10}},
+        title={"text": "Throttle %", "font": {"color": GREEN, "size": 11}},
         range=[0, 105],
-        gridcolor=BORDER, zerolinecolor=BORDER,
+        gridcolor="#333333", griddash="dot", zerolinecolor=BORDER,
         tickfont={"color": GREEN, "size": 10},
         row=3, col=1,
     )
 
-    fig.update_annotations(font_size=0)
     return fig
 
 
