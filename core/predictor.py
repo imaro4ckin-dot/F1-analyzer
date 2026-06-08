@@ -116,7 +116,7 @@ def predict_continuous(
         centers.append(center)
 
     if not feature_rows:
-        return scores.ffill().bfill()
+        return scores.fillna(5.0)
 
     # Single vectorised model.predict() call across all windows
     X = pd.DataFrame(feature_rows).reset_index(drop=True)

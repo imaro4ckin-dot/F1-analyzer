@@ -309,7 +309,8 @@ def register_callbacks(app):
         if not laps:
             raise PreventUpdate
 
-        peak_lap = max(laps, key=lambda r: r["avg_stress"])["lap"]
+        peak_lap_entry = max(laps, key=lambda r: r["avg_stress"])
+        peak_lap = peak_lap_entry["lap"]
 
         fig = go.Figure()
         fig.add_trace(go.Bar(
@@ -332,7 +333,7 @@ def register_callbacks(app):
         )
 
         fig.add_annotation(
-            x=peak_lap, y=peak_lap and laps[peak_lap - 1]["avg_stress"] if peak_lap <= len(laps) else 10,
+            x=peak_lap, y=peak_lap_entry["avg_stress"],
             text="PEAK",
             showarrow=False,
             yshift=14,
@@ -506,6 +507,13 @@ def register_callbacks(app):
         point = points[0]
         custom = point.get("customdata")
         if custom is None:
+            raise PreventUpdate
+        # Dash wraps scalar customdata in a list for list-based customdata traces
+        if isinstance(custom, (list, tuple)):
+            if not custom:
+                raise PreventUpdate
+            custom = custom[0]
+        if not isinstance(custom, (int, float)):
             raise PreventUpdate
 
         idx = int(custom)
@@ -943,7 +951,7 @@ def _add_incident_bands(fig, incidents: list):
         is_deployed = "DEPLOYED" in msg or "SAFETY CAR DEPLOYED" in msg or "SAFETY CAR OUT" in msg
         is_withdrawn = "IN THIS LAP" in msg or "WITHDRAWN" in msg or "ENDING" in msg
 
-        if (is_sc or is_vsc) and (is_deployed or (not is_withdrawn)):
+        if (is_sc or is_vsc) and is_deployed:
             # Find end: next withdrawn or next deployment
             end_dt = None
             for j in range(i + 1, len(events)):
