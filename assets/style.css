@@ -1,140 +1,181 @@
 /* F1 Stress Analyzer — dark theme stylesheet */
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap');
 
-/* ── Dash 4 Dropdown (uses VirtualizedSelect / react-select internally) ── */
-/* Container */
-.f1-dropdown .dash-dropdown,
-.f1-dropdown > div {
-    background-color: #1C1C1C !important;
-    border-color: #2A2A2A !important;
-    color: #F5F5F5 !important;
+/* ── CSS variables (match layout.py tokens) ───────────────────────────── */
+:root {
+    --bg:      #0A0A0A;
+    --surface: #111111;
+    --card:    #161616;
+    --card2:   #1A1A1A;
+    --border:  #252525;
+    --border2: #333333;
+    --red:     #E10600;
+    --white:   #F0F0F0;
+    --grey:    #707070;
+    --grey2:   #4A4A4A;
+    --green:   #00D264;
+    --orange:  #FF8C00;
 }
-/* The visible control box */
-.f1-dropdown .Select-control,
-.f1-dropdown [class*="-control"] {
-    background-color: #1C1C1C !important;
-    border-color: #2A2A2A !important;
-    box-shadow: none !important;
+
+/* ── Body ──────────────────────────────────────────────────────────────── */
+body { background-color: var(--bg); margin: 0; }
+
+/* ── Dash 4 design tokens — override the built-in light-mode theme ─────── */
+/* These --Dash-* variables are what the Dash 4 dropdown component reads.   */
+/* Overriding them here is the only reliable way to theme Dash 4 dropdowns. */
+:root {
+    --Dash-Fill-Inverse-Strong:   var(--card2);        /* control + menu background */
+    --Dash-Fill-Interactive-Weak: rgba(225,6,0,0.08);  /* option hover background   */
+    --Dash-Fill-Interactive-Strong: var(--red);        /* selected item             */
+    --Dash-Fill-Primary-Hover:    rgba(255,255,255,0.05);
+    --Dash-Fill-Primary-Active:   rgba(255,255,255,0.08);
+    --Dash-Fill-Disabled:         rgba(255,255,255,0.06);
+    --Dash-Text-Primary:          var(--white);        /* selected value text        */
+    --Dash-Text-Strong:           var(--white);        /* option text               */
+    --Dash-Text-Weak:             var(--grey);         /* placeholder text          */
+    --Dash-Text-Disabled:         var(--grey2);
+    --Dash-Stroke-Strong:         var(--border2);      /* border                    */
+    --Dash-Stroke-Weak:           var(--border);
+    --Dash-Shading-Strong:        rgba(0,0,0,0.6);
+    --Dash-Shading-Weak:          rgba(0,0,0,0.3);
 }
-.f1-dropdown [class*="-control"]:hover {
-    border-color: #E10600 !important;
+
+/* ── Dash 4 Dropdown — semantic class targeting ────────────────────────── */
+/* Outer wrapper */
+.f1-dropdown .dash-dropdown-wrapper,
+.f1-dropdown .dash-dropdown {
+    background: var(--card2) !important;
+    color: var(--white) !important;
 }
+
+/* Trigger / control row */
+.f1-dropdown .dash-dropdown-trigger,
+.f1-dropdown .dash-dropdown-grid-container {
+    background: var(--card2) !important;
+    border-color: var(--border2) !important;
+    color: var(--white) !important;
+}
+.f1-dropdown .dash-dropdown-trigger:hover {
+    border-color: var(--red) !important;
+}
+
+/* Selected value chip */
+.f1-dropdown .dash-dropdown-value {
+    color: var(--white) !important;
+}
+
 /* Placeholder */
-.f1-dropdown [class*="-placeholder"],
-.f1-dropdown .Select-placeholder {
-    color: #888888 !important;
+.f1-dropdown .dash-dropdown-placeholder {
+    color: var(--grey) !important;
 }
-/* Selected value */
-.f1-dropdown [class*="-singleValue"],
-.f1-dropdown .Select-value-label {
-    color: #F5F5F5 !important;
-}
-/* Input text */
-.f1-dropdown [class*="-Input"] input,
-.f1-dropdown input {
-    color: #F5F5F5 !important;
-    caret-color: #E10600;
-}
-/* Dropdown menu */
-.f1-dropdown [class*="-menu"],
-.f1-dropdown .Select-menu-outer {
-    background-color: #1C1C1C !important;
-    border: 1px solid #2A2A2A !important;
+
+/* Dropdown panel (options list) */
+.f1-dropdown .dash-dropdown-content {
+    background: var(--card2) !important;
+    border: 1px solid var(--border2) !important;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.7) !important;
     z-index: 9999 !important;
 }
-/* Menu items */
-.f1-dropdown [class*="-option"],
-.f1-dropdown .Select-option {
-    background-color: #1C1C1C !important;
-    color: #F5F5F5 !important;
-    cursor: pointer;
-}
-.f1-dropdown [class*="-option"]:hover,
-.f1-dropdown .Select-option.is-focused {
-    background-color: #E10600 !important;
-    color: #FFFFFF !important;
-}
-/* Arrow indicator */
-.f1-dropdown [class*="-indicatorContainer"] svg {
-    fill: #888888;
-}
-.f1-dropdown [class*="-indicatorSeparator"] {
-    background-color: #2A2A2A !important;
+
+/* Search input inside open panel */
+.f1-dropdown .dash-dropdown-search,
+.f1-dropdown .dash-dropdown-search-container input {
+    background: transparent !important;
+    color: var(--white) !important;
+    caret-color: var(--red) !important;
+    border-color: var(--border2) !important;
 }
 
-/* ── Driver text input ─────────────────────────────────────────────────── */
-#input-driver {
-    background-color: #1C1C1C !important;
-    color: #F5F5F5 !important;
-    border: 1px solid #2A2A2A !important;
+/* Individual options */
+.f1-dropdown .dash-dropdown-options {
+    background: var(--card2) !important;
+}
+.f1-dropdown .dash-dropdown-option {
+    color: var(--white) !important;
+    background: var(--card2) !important;
+    font-size: 12px;
+}
+.f1-dropdown .dash-dropdown-option:hover,
+.f1-dropdown .dash-dropdown-option[aria-selected="true"] {
+    background: var(--red) !important;
+    color: #fff !important;
+}
+
+/* Chevron / trigger icon */
+.f1-dropdown .dash-dropdown-trigger-icon {
+    color: var(--grey) !important;
+    fill: var(--grey) !important;
+}
+
+/* Clear (×) button */
+.f1-dropdown .dash-dropdown-clear {
+    color: var(--grey) !important;
+}
+.f1-dropdown .dash-dropdown-clear:hover {
+    color: var(--white) !important;
+}
+
+/* ── Driver text inputs ─────────────────────────────────────────────────── */
+#input-driver,
+#input-driver2 {
+    background-color: var(--card2) !important;
+    color: var(--white) !important;
+    border: 1px solid var(--border2) !important;
     outline: none;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
 }
 #input-driver:focus {
-    border-color: #E10600 !important;
+    border-color: var(--red) !important;
+    box-shadow: 0 0 0 2px rgba(225,6,0,0.15) !important;
+}
+#input-driver2:focus {
+    border-color: var(--orange) !important;
+    box-shadow: 0 0 0 2px rgba(255,140,0,0.15) !important;
 }
 
-/* ── Plotly modebar (zoom toolbar) ────────────────────────────────────── */
+/* ── Analyze button ─────────────────────────────────────────────────────── */
+#btn-analyze:hover  { background-color: #C00500 !important; }
+#btn-analyze:active { transform: scale(0.97); }
+
+/* ── Stats bar chip hover ───────────────────────────────────────────────── */
+#stats-bar > div {
+    transition: border-color 0.15s, border-top-color 0.15s;
+}
+#stats-bar > div:hover {
+    border-color: var(--border2) !important;
+    border-top-color: var(--red) !important;
+}
+
+/* ── Plotly modebar ─────────────────────────────────────────────────────── */
 .modebar {
-    background: rgba(22,22,22,0.85) !important;
+    background: rgba(17,17,17,0.85) !important;
     border-radius: 4px;
 }
-.modebar-btn path {
-    fill: #888888 !important;
+.modebar-btn path        { fill: var(--grey) !important; }
+.modebar-btn:hover path  { fill: var(--red)  !important; }
+.modebar-btn.active path { fill: var(--red)  !important; }
+
+/* ── Plotly unified hover label ─────────────────────────────────────────── */
+.hoverlayer .unified-hover-label rect {
+    fill:   var(--card2) !important;
+    stroke: var(--border2) !important;
 }
-.modebar-btn:hover path {
-    fill: #E10600 !important;
-}
-.modebar-btn.active path {
-    fill: #E10600 !important;
+.hoverlayer .unified-hover-label text {
+    fill: var(--white) !important;
 }
 
-/* ── Scrollbar ─────────────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #161616; }
-::-webkit-scrollbar-thumb { background: #E10600; border-radius: 3px; }
+/* ── Radio card fade-in ─────────────────────────────────────────────────── */
+.radio-card { animation: fadeIn 0.25s ease; }
 
-/* ── Radio card animation ──────────────────────────────────────────────── */
-.radio-card { animation: fadeIn 0.3s ease; }
+/* ── Lap time chart fade-in ─────────────────────────────────────────────── */
+#chart-lap-times .js-plotly-plot { animation: fadeIn 0.3s ease; }
+
 @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(8px); }
+    from { opacity: 0; transform: translateY(6px); }
     to   { opacity: 1; transform: translateY(0);   }
 }
 
-/* ── Analyze button hover ──────────────────────────────────────────────── */
-#btn-analyze:hover { background-color: #B30500 !important; }
-
-/* ── Body ──────────────────────────────────────────────────────────────── */
-body { background-color: #0D0D0D; margin: 0; }
-
-/* ── Plotly unified hover label ────────────────────────────────────────── */
-.hoverlayer .unified-hover-label rect {
-    fill: #1C1C1C !important;
-    stroke: #2A2A2A !important;
-}
-.hoverlayer .unified-hover-label text {
-    fill: #F5F5F5 !important;
-}
-
-/* ── Driver 2 text input ───────────────────────────────────────────────── */
-#input-driver2 {
-    background-color: #1C1C1C !important;
-    color: #F5F5F5 !important;
-    border: 1px solid #2A2A2A !important;
-    outline: none;
-}
-#input-driver2:focus {
-    border-color: #FF6B35 !important;   /* orange for driver 2 */
-}
-
-/* ── Stats bar chips ───────────────────────────────────────────────────── */
-#stats-bar > div {
-    transition: border-color 0.15s;
-}
-#stats-bar > div:hover {
-    border-color: #E10600 !important;
-}
-
-/* ── Lap time chart fade-in ────────────────────────────────────────────── */
-#chart-lap-times .js-plotly-plot {
-    animation: fadeIn 0.3s ease;
-}
+/* ── Scrollbar ──────────────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--surface); }
+::-webkit-scrollbar-thumb { background: var(--red); border-radius: 3px; }

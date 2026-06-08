@@ -2,38 +2,66 @@ from dash import dcc, html
 import dash_bootstrap_components as dbc
 
 # ── Colour palette ──────────────────────────────────────────────────────────
-BG = "#0D0D0D"
-SURFACE = "#161616"
-CARD = "#1C1C1C"
-BORDER = "#2A2A2A"
-RED = "#E10600"
-RED_DIM = "#7A0300"
-WHITE = "#F5F5F5"
-GREY = "#888888"
-GREEN = "#39FF14"
-ORANGE = "#FF6B35"
-YELLOW = "#FFD700"
-TYRE_SOFT = "#E10600"
+BG      = "#0A0A0A"      # True OLED black
+SURFACE = "#111111"      # Header / nav surface
+CARD    = "#161616"      # Card / panel background
+CARD2   = "#1A1A1A"      # Slightly elevated card (inner sections)
+BORDER  = "#252525"      # Subtle border
+BORDER2 = "#333333"      # More visible divider
+RED     = "#E10600"      # F1 primary red
+RED_DIM = "#7A0300"      # Dimmed red
+WHITE   = "#F0F0F0"      # Primary text
+GREY    = "#707070"      # Secondary / label text
+GREY2   = "#4A4A4A"      # Muted / disabled text
+GREEN   = "#00D264"      # Positive / fastest lap
+ORANGE  = "#FF8C00"      # Medium stress / warning
+YELLOW  = "#FFD700"  # P1 / gold
+
+# Tyre compound colours (kept for callbacks)
+TYRE_SOFT   = "#E10600"
 TYRE_MEDIUM = "#FFF200"
-TYRE_HARD = "#F5F5F5"
+TYRE_HARD   = "#F0F0F0"
+
+# ── Typography ───────────────────────────────────────────────────────────────
+FONT_MONO = "'JetBrains Mono', 'Fira Code', 'Courier New', monospace"
+FONT_SANS = "'Fira Sans', 'Inter', system-ui, sans-serif"
 
 # ── Shared style helpers ─────────────────────────────────────────────────────
 LABEL_STYLE = {
     "color": GREY,
     "fontSize": "10px",
-    "letterSpacing": "0.15em",
+    "letterSpacing": "0.18em",
     "textTransform": "uppercase",
-    "marginBottom": "4px",
-    "fontFamily": "'JetBrains Mono', 'Courier New', monospace",
+    "marginBottom": "6px",
+    "fontFamily": FONT_MONO,
+    "fontWeight": "500",
+}
+
+SECTION_TITLE_STYLE = {
+    **LABEL_STYLE,
+    "fontSize": "9px",
+    "letterSpacing": "0.22em",
+    "borderLeft": f"2px solid {RED}",
+    "paddingLeft": "8px",
+    "marginBottom": "0",
+    "lineHeight": "1",
 }
 
 DROPDOWN_STYLE = {
-    "backgroundColor": CARD,
+    "backgroundColor": CARD2,
     "color": RED,
-    "border": f"1px solid {BORDER}",
+    "border": f"1px solid {BORDER2}",
     "borderRadius": "4px",
-    "fontFamily": "'JetBrains Mono', 'Courier New', monospace",
-    "fontSize": "13px",
+    "fontFamily": FONT_MONO,
+    "fontSize": "12px",
+}
+
+INPUT_STYLE = {
+    **DROPDOWN_STYLE,
+    "padding": "8px 12px",
+    "outline": "none",
+    "textTransform": "uppercase",
+    "letterSpacing": "0.1em",
 }
 
 
@@ -49,190 +77,305 @@ def _dropdown(id_, placeholder, options=None, value=None, clearable=False):
     )
 
 
-def _stat_chip(chip_id: str, label: str):
-    """Return a stats bar metric chip with a label and updatable value."""
+def _stat_chip(chip_id: str, label: str, icon: str = ""):
+    """Metric chip: label on top, large value below, optional accent icon."""
     return html.Div(
         id=chip_id,
         style={
             "backgroundColor": CARD,
             "border": f"1px solid {BORDER}",
+            "borderTop": f"2px solid {BORDER2}",
             "borderRadius": "6px",
-            "padding": "8px 16px",
-            "minWidth": "120px",
+            "padding": "10px 18px",
+            "minWidth": "110px",
+            "flex": "1",
             "display": "flex",
             "flexDirection": "column",
-            "gap": "2px",
+            "gap": "4px",
         },
         children=[
-            html.Div(label, style={**LABEL_STYLE, "marginBottom": "0"}),
+            html.Div(
+                style={"display": "flex", "alignItems": "center", "gap": "6px"},
+                children=[
+                    html.Span(icon, style={"fontSize": "10px", "opacity": "0.6"}) if icon else None,
+                    html.Span(label, style={**LABEL_STYLE, "marginBottom": "0"}),
+                ],
+            ),
             html.Div("—", id=f"{chip_id}-val", style={
                 "color": WHITE,
-                "fontSize": "14px",
+                "fontSize": "16px",
                 "fontWeight": "700",
-                "fontFamily": "'JetBrains Mono', 'Courier New', monospace",
-                "letterSpacing": "0.05em",
+                "fontFamily": FONT_MONO,
+                "letterSpacing": "0.04em",
+                "lineHeight": "1.2",
             }),
         ],
     )
 
 
+def _panel_header(title: str, subtitle: str = ""):
+    """Section panel header with red left accent and optional subtitle."""
+    return html.Div(
+        style={
+            "display": "flex",
+            "alignItems": "center",
+            "justifyContent": "space-between",
+            "marginBottom": "14px",
+            "paddingBottom": "10px",
+            "borderBottom": f"1px solid {BORDER}",
+        },
+        children=[
+            html.Div(title, style=SECTION_TITLE_STYLE),
+            html.Div(subtitle, style={
+                "color": GREY2,
+                "fontSize": "9px",
+                "letterSpacing": "0.1em",
+                "fontFamily": FONT_MONO,
+                "textTransform": "uppercase",
+            }) if subtitle else None,
+        ],
+    )
+
+
+def _card(children, flex=None, min_width=None, extra_style=None):
+    style = {
+        "backgroundColor": CARD,
+        "border": f"1px solid {BORDER}",
+        "borderRadius": "8px",
+        "padding": "16px",
+    }
+    if flex:
+        style["flex"] = flex
+    if min_width:
+        style["minWidth"] = min_width
+    if extra_style:
+        style.update(extra_style)
+    return html.Div(style=style, children=children)
+
+
 def build_layout():
     return html.Div(
-        style={"backgroundColor": BG, "minHeight": "100vh", "fontFamily": "'JetBrains Mono', 'Courier New', monospace"},
+        style={
+            "backgroundColor": BG,
+            "minHeight": "100vh",
+            "fontFamily": FONT_MONO,
+            "color": WHITE,
+        },
         children=[
+
             # ── Header ──────────────────────────────────────────────────────
             html.Div(
                 style={
                     "backgroundColor": SURFACE,
                     "borderBottom": f"2px solid {RED}",
-                    "padding": "0 32px",
-                    "height": "60px",
+                    "padding": "0 28px",
+                    "height": "52px",
                     "display": "flex",
                     "alignItems": "center",
                     "justifyContent": "space-between",
+                    "position": "sticky",
+                    "top": "0",
+                    "zIndex": "100",
                 },
                 children=[
-                    html.Div(style={"display": "flex", "alignItems": "center", "gap": "16px"}, children=[
-                        html.Div(style={"width": "4px", "height": "32px", "backgroundColor": RED}),
-                        html.Span("F1 STRESS ANALYZER", style={
-                            "color": WHITE, "fontSize": "15px", "fontWeight": "700",
-                            "letterSpacing": "0.2em",
-                        }),
-                    ]),
-                    html.Span("AI · TELEMETRY · RADIO", style={
-                        "color": GREY, "fontSize": "10px", "letterSpacing": "0.25em",
-                    }),
+                    # Left: logo mark + title
+                    html.Div(
+                        style={"display": "flex", "alignItems": "center", "gap": "14px"},
+                        children=[
+                            # F1 flag-stripe logo mark
+                            html.Div(
+                                style={"display": "flex", "flexDirection": "column", "gap": "3px"},
+                                children=[
+                                    html.Div(style={"width": "20px", "height": "3px", "backgroundColor": RED}),
+                                    html.Div(style={"width": "20px", "height": "3px", "backgroundColor": WHITE}),
+                                    html.Div(style={"width": "20px", "height": "3px", "backgroundColor": RED}),
+                                ],
+                            ),
+                            html.Div(
+                                style={"display": "flex", "flexDirection": "column", "gap": "1px"},
+                                children=[
+                                    html.Span("F1 STRESS ANALYZER", style={
+                                        "color": WHITE,
+                                        "fontSize": "13px",
+                                        "fontWeight": "700",
+                                        "letterSpacing": "0.22em",
+                                        "lineHeight": "1",
+                                    }),
+                                    html.Span("AI · TELEMETRY · RADIO ANALYSIS", style={
+                                        "color": GREY,
+                                        "fontSize": "8px",
+                                        "letterSpacing": "0.2em",
+                                        "lineHeight": "1",
+                                    }),
+                                ],
+                            ),
+                        ],
+                    ),
+                    # Right: session status badge
+                    html.Div(
+                        id="status-msg",
+                        style={
+                            "color": GREY,
+                            "fontSize": "10px",
+                            "letterSpacing": "0.12em",
+                            "fontFamily": FONT_MONO,
+                            "maxWidth": "400px",
+                            "textAlign": "right",
+                        },
+                    ),
                 ],
             ),
 
-            # ── Controls bar ────────────────────────────────────────────────
+            # ── Controls bar ─────────────────────────────────────────────────
             html.Div(
                 style={
                     "backgroundColor": SURFACE,
                     "borderBottom": f"1px solid {BORDER}",
-                    "padding": "16px 32px",
+                    "padding": "12px 28px",
                     "display": "flex",
-                    "gap": "16px",
+                    "gap": "12px",
                     "alignItems": "flex-end",
                     "flexWrap": "wrap",
                 },
                 children=[
+                    # Season
                     html.Div([
-                        html.Div("SEASON", style=LABEL_STYLE),
+                        html.Div("Season", style=LABEL_STYLE),
                         _dropdown(
                             "dd-year", "Year",
                             options=[{"label": str(y), "value": y} for y in [2023, 2024, 2025]],
                             value=2024,
                         ),
-                    ], style={"minWidth": "120px"}),
+                    ], style={"minWidth": "110px", "width": "110px"}),
 
+                    # Grand Prix
                     html.Div([
-                        html.Div("GRAND PRIX", style=LABEL_STYLE),
+                        html.Div("Grand Prix", style=LABEL_STYLE),
                         _dropdown("dd-race", "Select race…"),
-                    ], style={"minWidth": "240px", "flex": "1"}),
+                    ], style={"minWidth": "220px", "flex": "2"}),
 
+                    # Vertical divider
+                    html.Div(style={
+                        "width": "1px",
+                        "height": "36px",
+                        "backgroundColor": BORDER2,
+                        "alignSelf": "flex-end",
+                        "marginBottom": "2px",
+                    }),
+
+                    # Driver 1
                     html.Div([
-                        html.Div("DRIVER", style=LABEL_STYLE),
+                        html.Div("Driver", style=LABEL_STYLE),
                         dcc.Input(
                             id="input-driver",
                             type="text",
                             value="LEC",
                             maxLength=3,
-                            placeholder="VER",
-                            style={
-                                **DROPDOWN_STYLE,
-                                "padding": "8px 12px",
-                                "width": "80px",
-                                "textTransform": "uppercase",
-                            },
+                            placeholder="LEC",
+                            style={**INPUT_STYLE, "width": "72px"},
                         ),
                     ]),
 
+                    # VS label
+                    html.Div("VS", style={
+                        "color": GREY2,
+                        "fontSize": "9px",
+                        "letterSpacing": "0.2em",
+                        "alignSelf": "flex-end",
+                        "paddingBottom": "10px",
+                        "fontFamily": FONT_MONO,
+                    }),
+
+                    # Driver 2
                     html.Div([
-                        html.Div("VS DRIVER", style=LABEL_STYLE),
+                        html.Div("Compare", style=LABEL_STYLE),
                         dcc.Input(
                             id="input-driver2",
                             type="text",
                             value="",
                             maxLength=3,
-                            placeholder="VER (opt.)",
-                            style={
-                                **DROPDOWN_STYLE,
-                                "padding": "8px 12px",
-                                "width": "100px",
-                                "textTransform": "uppercase",
-                            },
+                            placeholder="optional",
+                            style={**INPUT_STYLE, "width": "96px"},
                         ),
                     ]),
 
+                    # Vertical divider
+                    html.Div(style={
+                        "width": "1px",
+                        "height": "36px",
+                        "backgroundColor": BORDER2,
+                        "alignSelf": "flex-end",
+                        "marginBottom": "2px",
+                    }),
+
+                    # Analyze button
                     html.Div([
-                        html.Div("\u00a0", style=LABEL_STYLE),
+                        html.Div("\u00a0", style={**LABEL_STYLE, "visibility": "hidden"}),
                         html.Button(
-                            "ANALYZE",
+                            children=[
+                                html.Span("ANALYZE", style={"letterSpacing": "0.18em"}),
+                            ],
                             id="btn-analyze",
                             n_clicks=0,
                             style={
                                 "backgroundColor": RED,
                                 "color": WHITE,
                                 "border": "none",
-                                "padding": "9px 28px",
-                                "fontFamily": "'JetBrains Mono', 'Courier New', monospace",
-                                "fontSize": "12px",
+                                "padding": "8px 24px",
+                                "fontFamily": FONT_MONO,
+                                "fontSize": "11px",
                                 "fontWeight": "700",
-                                "letterSpacing": "0.15em",
                                 "cursor": "pointer",
                                 "borderRadius": "4px",
-                                "transition": "background 0.15s",
+                                "transition": "background 0.15s, transform 0.1s",
+                                "outline": "none",
+                                "height": "36px",
                             },
                         ),
                     ]),
-
-                    # Status message
-                    html.Div(id="status-msg", style={
-                        "color": GREY, "fontSize": "11px", "letterSpacing": "0.1em",
-                        "alignSelf": "center", "marginLeft": "8px",
-                    }),
                 ],
             ),
 
-            # ── Stats bar (hidden until analysis runs) ──────────────────────
+            # ── Stats bar (hidden until analysis runs) ────────────────────────
             html.Div(
                 id="stats-bar",
                 style={
                     "backgroundColor": SURFACE,
                     "borderBottom": f"1px solid {BORDER}",
-                    "padding": "10px 32px",
+                    "padding": "10px 28px",
                     "display": "none",
-                    "gap": "12px",
+                    "gap": "10px",
                     "flexWrap": "wrap",
-                    "alignItems": "center",
+                    "alignItems": "stretch",
                 },
                 children=[
-                    _stat_chip("chip-peak-stress",  "PEAK STRESS"),
-                    _stat_chip("chip-avg-stress",   "AVG STRESS"),
-                    _stat_chip("chip-fastest-lap",  "FASTEST LAP"),
-                    _stat_chip("chip-pit-stops",    "PIT STOPS"),
-                    _stat_chip("chip-radio-count",  "RADIO MSGS"),
+                    _stat_chip("chip-peak-stress", "Peak Stress"),
+                    _stat_chip("chip-avg-stress",  "Avg Stress"),
+                    _stat_chip("chip-fastest-lap", "Fastest Lap"),
+                    _stat_chip("chip-pit-stops",   "Pit Stops"),
+                    _stat_chip("chip-radio-count", "Radio Msgs"),
                 ],
             ),
 
-            # ── Main content ────────────────────────────────────────────────
+            # ── Main charts row ───────────────────────────────────────────────
             html.Div(
-                style={"padding": "20px 32px", "display": "flex", "gap": "20px", "flexWrap": "wrap"},
+                style={
+                    "padding": "20px 28px 0 28px",
+                    "display": "flex",
+                    "gap": "16px",
+                    "flexWrap": "wrap",
+                },
                 children=[
 
-                    # Left: Telemetry chart
-                    html.Div(
-                        style={
-                            "flex": "6",
-                            "minWidth": "460px",
-                            "backgroundColor": CARD,
-                            "border": f"1px solid {BORDER}",
-                            "borderRadius": "6px",
-                            "padding": "16px",
-                        },
+                    # Telemetry & AI stress (wide)
+                    _card(
+                        flex="6",
+                        min_width="460px",
                         children=[
-                            html.Div("TELEMETRY & AI STRESS", style={**LABEL_STYLE, "marginBottom": "12px"}),
+                            _panel_header(
+                                "Telemetry & AI Stress",
+                                "speed · throttle · brake · gear · drs",
+                            ),
                             dcc.Graph(
                                 id="chart-telemetry",
                                 config={
@@ -243,34 +386,38 @@ def build_layout():
                                         "toggleSpikelines",
                                     ],
                                     "displaylogo": False,
-                                    "toImageButtonOptions": {"format": "png", "filename": "f1_telemetry"},
+                                    "toImageButtonOptions": {
+                                        "format": "png",
+                                        "filename": "f1_telemetry",
+                                    },
                                 },
-                                style={"height": "520px"},
-                                figure=_empty_figure("Select a race and driver, then click ANALYZE"),
+                                style={"height": "500px"},
+                                figure=_empty_figure(
+                                    "Select a season, race and driver\nthen click ANALYZE"
+                                ),
                             ),
                         ],
                     ),
 
-                    # Right: Track map
-                    html.Div(
-                        style={
-                            "flex": "4",
-                            "minWidth": "320px",
-                            "backgroundColor": CARD,
-                            "border": f"1px solid {BORDER}",
-                            "borderRadius": "6px",
-                            "padding": "16px",
-                        },
+                    # Track map (narrower)
+                    _card(
+                        flex="4",
+                        min_width="300px",
                         children=[
-                            html.Div("TRACK MAP  ·  RADIO EVENTS", style={**LABEL_STYLE, "marginBottom": "12px"}),
+                            _panel_header(
+                                "Track Map",
+                                "click a marker to load radio",
+                            ),
                             dcc.Graph(
                                 id="chart-track",
                                 config={
                                     "displayModeBar": True,
-                                    "modeBarButtonsToRemove": ["select2d", "lasso2d", "toggleSpikelines"],
+                                    "modeBarButtonsToRemove": [
+                                        "select2d", "lasso2d", "toggleSpikelines",
+                                    ],
                                     "displaylogo": False,
                                 },
-                                style={"height": "520px"},
+                                style={"height": "500px"},
                                 figure=_empty_figure(""),
                             ),
                         ],
@@ -278,73 +425,63 @@ def build_layout():
                 ],
             ),
 
-            # ── Radio panel ─────────────────────────────────────────────────
+            # ── Radio panel (click-to-expand) ─────────────────────────────────
             html.Div(
                 id="radio-panel",
-                style={"padding": "0 32px 20px 32px"},
+                style={"padding": "16px 28px 0 28px"},
                 children=[],
             ),
 
-            # ── Lap charts: stress + lap time side-by-side ──────────────────
+            # ── Lap analysis row ───────────────────────────────────────────────
             html.Div(
-                style={"padding": "0 32px 20px 32px"},
+                style={
+                    "padding": "16px 28px 0 28px",
+                    "display": "flex",
+                    "gap": "16px",
+                    "flexWrap": "wrap",
+                },
                 children=[
-                    html.Div(
-                        style={"display": "flex", "gap": "20px", "flexWrap": "wrap"},
+
+                    # Lap-by-lap stress
+                    _card(
+                        flex="1",
+                        min_width="280px",
                         children=[
-                            # Left: Lap-by-lap stress
-                            html.Div(
-                                style={
-                                    "flex": "1",
-                                    "minWidth": "300px",
-                                    "backgroundColor": CARD,
-                                    "border": f"1px solid {BORDER}",
-                                    "borderRadius": "6px",
-                                    "padding": "16px",
-                                },
-                                children=[
-                                    html.Div("LAP-BY-LAP STRESS", style={**LABEL_STYLE, "marginBottom": "8px"}),
-                                    dcc.Graph(
-                                        id="chart-lap-stress",
-                                        config={"displayModeBar": False, "displaylogo": False},
-                                        style={"height": "160px"},
-                                        figure=_empty_figure(""),
-                                    ),
-                                ],
+                            _panel_header("Lap-by-Lap Stress", "avg ai stress per lap"),
+                            dcc.Graph(
+                                id="chart-lap-stress",
+                                config={"displayModeBar": False, "displaylogo": False},
+                                style={"height": "180px"},
+                                figure=_empty_figure(""),
                             ),
-                            # Right: Lap time evolution
-                            html.Div(
-                                style={
-                                    "flex": "1",
-                                    "minWidth": "300px",
-                                    "backgroundColor": CARD,
-                                    "border": f"1px solid {BORDER}",
-                                    "borderRadius": "6px",
-                                    "padding": "16px",
-                                },
-                                children=[
-                                    html.Div("LAP TIME EVOLUTION", style={**LABEL_STYLE, "marginBottom": "8px"}),
-                                    dcc.Graph(
-                                        id="chart-lap-times",
-                                        config={"displayModeBar": False, "displaylogo": False},
-                                        style={"height": "160px"},
-                                        figure=_empty_figure(""),
-                                    ),
-                                ],
+                        ],
+                    ),
+
+                    # Lap time evolution
+                    _card(
+                        flex="1",
+                        min_width="280px",
+                        children=[
+                            _panel_header("Lap Time Evolution", "seconds per lap"),
+                            dcc.Graph(
+                                id="chart-lap-times",
+                                config={"displayModeBar": False, "displaylogo": False},
+                                style={"height": "180px"},
+                                figure=_empty_figure(""),
                             ),
                         ],
                     ),
                 ],
             ),
 
-            # ── Leaderboard panel ────────────────────────────────────────────
+            # ── Leaderboard panel ─────────────────────────────────────────────
             html.Div(
                 id="leaderboard-panel",
-                style={"padding": "0 32px 32px 32px"},
+                style={"padding": "16px 28px 36px 28px"},
                 children=[],
             ),
 
-            # ── Hidden data stores ───────────────────────────────────────────
+            # ── Hidden data stores ────────────────────────────────────────────
             dcc.Store(id="store-radio"),
             dcc.Store(id="store-session-meta"),
             dcc.Store(id="store-lap-stress"),
@@ -363,17 +500,24 @@ def _empty_figure(annotation: str):
     fig.update_layout(
         paper_bgcolor=CARD,
         plot_bgcolor=CARD,
-        font={"color": WHITE, "family": "JetBrains Mono, Courier New, monospace"},
+        font={"color": WHITE, "family": FONT_MONO},
         margin={"l": 40, "r": 20, "t": 10, "b": 40},
-        xaxis={"showgrid": False, "zeroline": False, "showticklabels": False, "color": GREY},
-        yaxis={"showgrid": False, "zeroline": False, "showticklabels": False, "color": GREY},
+        xaxis={
+            "showgrid": False, "zeroline": False,
+            "showticklabels": False, "color": GREY,
+        },
+        yaxis={
+            "showgrid": False, "zeroline": False,
+            "showticklabels": False, "color": GREY,
+        },
     )
     if annotation:
         fig.add_annotation(
-            text=annotation,
+            text=annotation.replace("\n", "<br>"),
             xref="paper", yref="paper",
             x=0.5, y=0.5,
             showarrow=False,
-            font={"color": GREY, "size": 12},
+            font={"color": GREY2, "size": 12, "family": FONT_MONO},
+            align="center",
         )
     return fig

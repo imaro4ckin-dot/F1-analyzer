@@ -21,7 +21,7 @@ from core.predictor import load_model, predict_continuous, predict_at_timestamp,
 from core.transcriber import transcribe_audio_url
 from app.layout import (
     BG, SURFACE, CARD, BORDER, RED, RED_DIM, WHITE, GREY, GREEN, ORANGE,
-    YELLOW, TYRE_SOFT, TYRE_MEDIUM, TYRE_HARD, LABEL_STYLE,
+    YELLOW, TYRE_SOFT, TYRE_MEDIUM, TYRE_HARD, LABEL_STYLE, FONT_MONO,
 )
 
 # ── Load ML model once at import time ───────────────────────────────────────
@@ -458,21 +458,22 @@ def register_callbacks(app):
         stats = lap_stress_data["stats"]
         base_val_style = {
             "color": WHITE,
-            "fontSize": "14px",
+            "fontSize": "16px",
             "fontWeight": "700",
-            "fontFamily": "'JetBrains Mono', 'Courier New', monospace",
-            "letterSpacing": "0.05em",
+            "fontFamily": FONT_MONO,
+            "letterSpacing": "0.04em",
+            "lineHeight": "1.2",
         }
         peak = stats["peak_stress"]
         peak_color = RED if peak >= 7.0 else (ORANGE if peak >= 5.0 else GREEN)
         stats_bar_style = {
             "backgroundColor": SURFACE,
             "borderBottom": f"1px solid {BORDER}",
-            "padding": "10px 32px",
+            "padding": "10px 28px",
             "display": "flex",
-            "gap": "12px",
+            "gap": "10px",
             "flexWrap": "wrap",
-            "alignItems": "center",
+            "alignItems": "stretch",
         }
         return (
             stats_bar_style,
@@ -943,9 +944,9 @@ def _add_incident_bands(fig, incidents: list):
     i = 0
     while i < len(events):
         ev = events[i]
-        msg = ev.get("message", "").upper()
-        cat = ev.get("category", "").upper()
-        flag = ev.get("flag", "").upper()
+        msg  = (ev.get("message")  or "").upper()
+        cat  = (ev.get("category") or "").upper()
+        flag = (ev.get("flag")     or "").upper()
         is_sc = "SAFETY CAR" in msg and "VIRTUAL" not in msg
         is_vsc = "VIRTUAL SAFETY CAR" in msg or "VSC" in cat
         is_deployed = "DEPLOYED" in msg or "SAFETY CAR DEPLOYED" in msg or "SAFETY CAR OUT" in msg
