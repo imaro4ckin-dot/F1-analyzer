@@ -21,7 +21,8 @@ from core.predictor import load_model, predict_continuous, predict_at_timestamp,
 from core.transcriber import transcribe_audio_url
 from app.layout import (
     BG, SURFACE, CARD, BORDER, RED, RED_DIM, WHITE, GREY, GREEN, ORANGE,
-    YELLOW, TYRE_SOFT, TYRE_MEDIUM, TYRE_HARD, LABEL_STYLE, FONT_MONO,
+    YELLOW, TYRE_SOFT, TYRE_MEDIUM, TYRE_HARD, LABEL_STYLE, FONT_MONO, FONT_SANS,
+    MUTED, MUTED2,
 )
 
 # ── Load ML model once at import time ───────────────────────────────────────
@@ -458,18 +459,18 @@ def register_callbacks(app):
         stats = lap_stress_data["stats"]
         base_val_style = {
             "color": WHITE,
-            "fontSize": "16px",
+            "fontSize": "18px",
             "fontWeight": "700",
             "fontFamily": FONT_MONO,
-            "letterSpacing": "0.04em",
-            "lineHeight": "1.2",
+            "letterSpacing": "0.03em",
+            "lineHeight": "1",
         }
         peak = stats["peak_stress"]
         peak_color = RED if peak >= 7.0 else (ORANGE if peak >= 5.0 else GREEN)
         stats_bar_style = {
             "backgroundColor": SURFACE,
             "borderBottom": f"1px solid {BORDER}",
-            "padding": "10px 28px",
+            "padding": "12px 32px",
             "display": "flex",
             "gap": "10px",
             "flexWrap": "wrap",
@@ -1419,54 +1420,61 @@ def _build_radio_panel(rec):
     return html.Div(
         className="radio-card",
         style={
-            "backgroundColor": CARD,
-            "border": f"1px solid {RED}",
-            "borderLeft": f"4px solid {RED}",
-            "borderRadius": "6px",
-            "padding": "20px 24px",
             "display": "flex",
             "gap": "32px",
             "alignItems": "center",
             "flexWrap": "wrap",
         },
         children=[
+            # Time + stress meter
             html.Div(style={"minWidth": "180px"}, children=[
                 html.Div(
                     f"RADIO  ·  {driver_label}" if driver_label else "RADIO TRANSMISSION",
                     style={**LABEL_STYLE, "marginBottom": "8px"},
                 ),
-                html.Div(time_str, style={"color": WHITE, "fontSize": "24px", "fontWeight": "700",
-                                         "letterSpacing": "0.1em"}),
-                html.Div(style={"marginTop": "12px"}, children=[
-                    html.Div("AI STRESS LEVEL", style={**LABEL_STYLE, "marginBottom": "6px"}),
+                html.Div(time_str, style={
+                    "color": WHITE, "fontSize": "26px", "fontWeight": "700",
+                    "letterSpacing": "0.08em", "fontFamily": FONT_MONO,
+                }),
+                html.Div(style={"marginTop": "14px"}, children=[
+                    html.Div("AI STRESS LEVEL", style={**LABEL_STYLE, "marginBottom": "8px"}),
                     html.Div(style={"display": "flex", "alignItems": "center", "gap": "12px"}, children=[
                         html.Div(style={
-                            "height": "6px", "width": "120px", "backgroundColor": BORDER, "borderRadius": "3px",
+                            "height": "4px", "width": "120px",
+                            "backgroundColor": "rgba(255,255,255,0.08)",
+                            "borderRadius": "99px",
                         }, children=[
                             html.Div(style={
-                                "height": "6px", "width": f"{bar_pct}%",
-                                "backgroundColor": stress_colour, "borderRadius": "3px",
-                                "transition": "width 0.5s ease",
+                                "height": "4px", "width": f"{bar_pct}%",
+                                "backgroundColor": stress_colour,
+                                "borderRadius": "99px",
+                                "boxShadow": f"0 0 8px {stress_colour}66",
+                                "transition": "width 0.5s var(--ease, ease)",
                             })
                         ]),
-                        html.Span(f"{stress:.1f}/10", style={"color": stress_colour, "fontSize": "13px",
-                                                              "fontWeight": "700"}),
+                        html.Span(f"{stress:.1f}/10", style={
+                            "color": stress_colour, "fontSize": "13px",
+                            "fontWeight": "700", "fontFamily": FONT_MONO,
+                        }),
                     ]),
                 ]),
             ]),
 
+            # Transcript
             html.Div(style={"flex": "1", "minWidth": "200px"}, children=[
                 html.Div("TRANSCRIPT", style={**LABEL_STYLE, "marginBottom": "8px"}),
                 html.Div(
                     f'"{transcript}"',
                     style={
-                        "fontSize": "14px", "lineHeight": "1.6",
+                        "fontSize": "14px", "lineHeight": "1.7",
+                        "fontFamily": FONT_SANS,
                         "fontStyle": "italic" if transcript != "[engine static]" else "normal",
-                        "color": GREY if transcript == "[engine static]" else WHITE,
+                        "color": MUTED if transcript == "[engine static]" else WHITE,
                     },
                 ),
             ]),
 
+            # Audio player
             html.Div(style={"minWidth": "200px"}, children=[
                 html.Div("AUDIO", style={**LABEL_STYLE, "marginBottom": "8px"}),
                 html.Audio(
@@ -1474,9 +1482,11 @@ def _build_radio_panel(rec):
                     controls=True,
                     style={
                         "width": "100%",
-                        "filter": "invert(1) hue-rotate(150deg) brightness(0.9)",
+                        "filter": "invert(1) hue-rotate(150deg) brightness(0.85)",
                     },
-                ) if audio_url else html.Div("No audio available", style={"color": GREY, "fontSize": "11px"}),
+                ) if audio_url else html.Div("No audio available", style={
+                    "color": MUTED, "fontSize": "11px", "fontFamily": FONT_MONO,
+                }),
             ]),
         ],
     )
@@ -1493,60 +1503,101 @@ def _build_leaderboard_panel(leaderboard_data: list):
         bar_pct = int((avg / 10) * 100)
         stress_color = _stress_colour(avg)
 
-        rank_color = {1: YELLOW, 2: WHITE, 3: ORANGE}.get(rank, GREY)
+        rank_color = {1: YELLOW, 2: WHITE, 3: ORANGE}.get(rank, MUTED)
 
         rows.append(html.Div(
             style={
                 "display": "flex",
                 "alignItems": "center",
                 "gap": "16px",
-                "padding": "8px 0",
-                "borderBottom": f"1px solid {BORDER}",
+                "padding": "10px 0",
+                "borderBottom": "1px solid rgba(255,255,255,0.05)",
             },
             children=[
-                # Rank
+                # Rank badge
                 html.Span(f"P{rank}", style={
-                    "color": rank_color, "fontSize": "11px", "fontWeight": "700",
-                    "minWidth": "28px", "letterSpacing": "0.05em",
+                    "color": rank_color,
+                    "fontSize": "10px",
+                    "fontWeight": "700",
+                    "fontFamily": FONT_MONO,
+                    "minWidth": "28px",
+                    "letterSpacing": "0.06em",
                 }),
                 # Driver code
                 html.Span(code, style={
-                    "color": WHITE, "fontSize": "13px", "fontWeight": "700",
-                    "minWidth": "40px", "letterSpacing": "0.1em",
+                    "color": WHITE,
+                    "fontSize": "13px",
+                    "fontWeight": "700",
+                    "fontFamily": FONT_MONO,
+                    "minWidth": "40px",
+                    "letterSpacing": "0.12em",
                 }),
                 # Stress bar
                 html.Div(style={"flex": "1", "minWidth": "80px", "maxWidth": "200px"}, children=[
                     html.Div(style={
-                        "height": "4px", "width": "100%",
-                        "backgroundColor": BORDER, "borderRadius": "2px",
+                        "height": "3px", "width": "100%",
+                        "backgroundColor": "rgba(255,255,255,0.08)",
+                        "borderRadius": "99px",
                     }, children=[
                         html.Div(style={
-                            "height": "4px", "width": f"{bar_pct}%",
-                            "backgroundColor": stress_color, "borderRadius": "2px",
+                            "height": "3px", "width": f"{bar_pct}%",
+                            "backgroundColor": stress_color,
+                            "borderRadius": "99px",
+                            "boxShadow": f"0 0 6px {stress_color}55",
                         })
                     ]),
                 ]),
-                # Avg stress value
+                # Avg stress
                 html.Span(f"{avg:.1f}", style={
-                    "color": stress_color, "fontSize": "12px", "fontWeight": "700",
+                    "color": stress_color,
+                    "fontSize": "13px",
+                    "fontWeight": "700",
+                    "fontFamily": FONT_MONO,
                     "minWidth": "30px",
                 }),
                 # Max stress
                 html.Span(f"max {max_s:.1f}", style={
-                    "color": GREY, "fontSize": "10px", "letterSpacing": "0.05em",
+                    "color": MUTED,
+                    "fontSize": "10px",
+                    "letterSpacing": "0.05em",
+                    "fontFamily": FONT_MONO,
                 }),
             ],
         ))
 
     return html.Div(
+        className="f1-card",
         style={
             "backgroundColor": CARD,
-            "border": f"1px solid {BORDER}",
-            "borderRadius": "6px",
-            "padding": "16px 24px",
+            "border": "1px solid rgba(255,255,255,0.06)",
+            "borderRadius": "16px",
+            "padding": "20px 24px",
         },
         children=[
-            html.Div("DRIVER STRESS LEADERBOARD", style={**LABEL_STYLE, "marginBottom": "12px"}),
+            html.Div(
+                style={
+                    "display": "flex",
+                    "alignItems": "center",
+                    "gap": "10px",
+                    "marginBottom": "16px",
+                },
+                children=[
+                    html.Div(style={
+                        "width": "6px", "height": "6px",
+                        "borderRadius": "50%",
+                        "backgroundColor": RED,
+                        "boxShadow": "0 0 8px rgba(232,0,13,0.4)",
+                    }),
+                    html.Span("Driver Stress Leaderboard", style={
+                        "color": WHITE,
+                        "fontSize": "11px",
+                        "fontWeight": "600",
+                        "letterSpacing": "0.06em",
+                        "fontFamily": FONT_SANS,
+                        "textTransform": "uppercase",
+                    }),
+                ],
+            ),
             html.Div(rows),
         ],
     )

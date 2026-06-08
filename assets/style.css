@@ -1,181 +1,300 @@
-/* F1 Stress Analyzer — dark theme stylesheet */
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap');
+/* ═══════════════════════════════════════════════════════════════════════════
+   F1 Stress Analyzer — Modern Cinema Dark Design System
+   ═══════════════════════════════════════════════════════════════════════════ */
 
-/* ── CSS variables (match layout.py tokens) ───────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700&family=Fira+Code:wght@400;500;600&display=swap');
+
+/* ── Design tokens ────────────────────────────────────────────────────────── */
 :root {
-    --bg:      #0A0A0A;
-    --surface: #111111;
-    --card:    #161616;
-    --card2:   #1A1A1A;
-    --border:  #252525;
-    --border2: #333333;
-    --red:     #E10600;
-    --white:   #F0F0F0;
-    --grey:    #707070;
-    --grey2:   #4A4A4A;
-    --green:   #00D264;
-    --orange:  #FF8C00;
+    --bg:         #070709;
+    --surface:    #0E0E12;
+    --card:       #12121A;
+    --card2:      #1A1A26;
+    --border:     rgba(255,255,255,0.06);
+    --border2:    rgba(255,255,255,0.12);
+    --red:        #E8000D;
+    --red-glow:   rgba(232,0,13,0.25);
+    --red-dim:    rgba(232,0,13,0.15);
+    --white:      #EDEDEF;
+    --muted:      #8A8F98;
+    --muted2:     #4A4D55;
+    --green:      #00D264;
+    --orange:     #FF8C00;
+    --yellow:     #FFD700;
+    --teal:       #00D4FF;
+    --radius-sm:  8px;
+    --radius-md:  12px;
+    --radius-lg:  16px;
+    --ease:       cubic-bezier(0.16, 1, 0.3, 1);
+    --font-sans:  'Inter', 'Fira Sans', system-ui, sans-serif;
+    --font-mono:  'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+
+    /* ── Dash 4 component tokens (override built-in light theme) ──────────── */
+    --Dash-Fill-Inverse-Strong:     var(--card2);
+    --Dash-Fill-Interactive-Weak:   rgba(232,0,13,0.1);
+    --Dash-Fill-Interactive-Strong: var(--red);
+    --Dash-Fill-Primary-Hover:      rgba(255,255,255,0.04);
+    --Dash-Fill-Primary-Active:     rgba(255,255,255,0.07);
+    --Dash-Fill-Disabled:           rgba(255,255,255,0.05);
+    --Dash-Text-Primary:            var(--white);
+    --Dash-Text-Strong:             var(--white);
+    --Dash-Text-Weak:               var(--muted);
+    --Dash-Text-Disabled:           var(--muted2);
+    --Dash-Stroke-Strong:           var(--border2);
+    --Dash-Stroke-Weak:             var(--border);
+    --Dash-Shading-Strong:          rgba(0,0,0,0.65);
+    --Dash-Shading-Weak:            rgba(0,0,0,0.35);
+    --Dash-Spacing:                 4px;
 }
 
-/* ── Body ──────────────────────────────────────────────────────────────── */
-body { background-color: var(--bg); margin: 0; }
+/* ── Reset & base ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
 
-/* ── Dash 4 design tokens — override the built-in light-mode theme ─────── */
-/* These --Dash-* variables are what the Dash 4 dropdown component reads.   */
-/* Overriding them here is the only reliable way to theme Dash 4 dropdowns. */
-:root {
-    --Dash-Fill-Inverse-Strong:   var(--card2);        /* control + menu background */
-    --Dash-Fill-Interactive-Weak: rgba(225,6,0,0.08);  /* option hover background   */
-    --Dash-Fill-Interactive-Strong: var(--red);        /* selected item             */
-    --Dash-Fill-Primary-Hover:    rgba(255,255,255,0.05);
-    --Dash-Fill-Primary-Active:   rgba(255,255,255,0.08);
-    --Dash-Fill-Disabled:         rgba(255,255,255,0.06);
-    --Dash-Text-Primary:          var(--white);        /* selected value text        */
-    --Dash-Text-Strong:           var(--white);        /* option text               */
-    --Dash-Text-Weak:             var(--grey);         /* placeholder text          */
-    --Dash-Text-Disabled:         var(--grey2);
-    --Dash-Stroke-Strong:         var(--border2);      /* border                    */
-    --Dash-Stroke-Weak:           var(--border);
-    --Dash-Shading-Strong:        rgba(0,0,0,0.6);
-    --Dash-Shading-Weak:          rgba(0,0,0,0.3);
+body {
+    background-color: var(--bg);
+    margin: 0;
+    font-family: var(--font-sans);
+    color: var(--white);
+    -webkit-font-smoothing: antialiased;
+    color-scheme: dark;
 }
 
-/* ── Dash 4 Dropdown — semantic class targeting ────────────────────────── */
-/* Outer wrapper */
+/* ── Navbar ───────────────────────────────────────────────────────────────── */
+#navbar {
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+}
+
+.nav-logo div {
+    border-radius: 1px;
+    transition: opacity 0.3s;
+}
+
+/* ── Controls bar inputs ──────────────────────────────────────────────────── */
+#input-driver,
+#input-driver2 {
+    background-color: var(--card2) !important;
+    color: var(--white) !important;
+    border: 1px solid var(--border2) !important;
+    border-radius: var(--radius-sm) !important;
+    font-family: var(--font-mono) !important;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+#input-driver:focus {
+    border-color: var(--red) !important;
+    box-shadow: 0 0 0 3px var(--red-dim) !important;
+}
+
+#input-driver2:focus {
+    border-color: var(--orange) !important;
+    box-shadow: 0 0 0 3px rgba(255,140,0,0.15) !important;
+}
+
+/* ── Analyze button ───────────────────────────────────────────────────────── */
+.btn-analyze {
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-analyze::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(255,255,255,0);
+    transition: background 0.2s;
+    border-radius: inherit;
+}
+
+.btn-analyze:hover {
+    box-shadow: 0 6px 28px var(--red-glow) !important;
+    transform: translateY(-1px);
+}
+
+.btn-analyze:hover::after {
+    background: rgba(255,255,255,0.06);
+}
+
+.btn-analyze:active {
+    transform: translateY(0) scale(0.98) !important;
+    box-shadow: 0 2px 10px var(--red-dim) !important;
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────────── */
+.f1-card {
+    transition: border-color 0.2s;
+    position: relative;
+}
+
+.f1-card:hover {
+    border-color: var(--border2) !important;
+}
+
+/* ── Stat chips ───────────────────────────────────────────────────────────── */
+.stat-chip {
+    transition: border-color 0.2s, box-shadow 0.2s;
+    cursor: default;
+}
+
+.stat-chip:hover {
+    border-color: var(--border2) !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+/* ── Dash 4 Dropdown ──────────────────────────────────────────────────────── */
 .f1-dropdown .dash-dropdown-wrapper,
 .f1-dropdown .dash-dropdown {
     background: var(--card2) !important;
     color: var(--white) !important;
+    border-radius: var(--radius-sm) !important;
 }
 
-/* Trigger / control row */
 .f1-dropdown .dash-dropdown-trigger,
 .f1-dropdown .dash-dropdown-grid-container {
     background: var(--card2) !important;
-    border-color: var(--border2) !important;
+    border: 1px solid var(--border2) !important;
+    border-radius: var(--radius-sm) !important;
     color: var(--white) !important;
-}
-.f1-dropdown .dash-dropdown-trigger:hover {
-    border-color: var(--red) !important;
+    min-height: 38px !important;
+    transition: border-color 0.2s !important;
 }
 
-/* Selected value chip */
+.f1-dropdown .dash-dropdown-trigger:hover {
+    border-color: rgba(255,255,255,0.25) !important;
+}
+
+.f1-dropdown .dash-dropdown-trigger:focus-within {
+    border-color: var(--red) !important;
+    box-shadow: 0 0 0 3px var(--red-dim) !important;
+}
+
 .f1-dropdown .dash-dropdown-value {
     color: var(--white) !important;
+    font-family: var(--font-mono) !important;
+    font-size: 12px !important;
 }
 
-/* Placeholder */
 .f1-dropdown .dash-dropdown-placeholder {
-    color: var(--grey) !important;
+    color: var(--muted) !important;
+    font-size: 12px !important;
 }
 
-/* Dropdown panel (options list) */
 .f1-dropdown .dash-dropdown-content {
     background: var(--card2) !important;
     border: 1px solid var(--border2) !important;
-    box-shadow: 0 8px 28px rgba(0,0,0,0.7) !important;
+    border-radius: var(--radius-sm) !important;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.8) !important;
+    backdrop-filter: blur(12px) !important;
     z-index: 9999 !important;
 }
 
-/* Search input inside open panel */
-.f1-dropdown .dash-dropdown-search,
-.f1-dropdown .dash-dropdown-search-container input {
-    background: transparent !important;
-    color: var(--white) !important;
-    caret-color: var(--red) !important;
-    border-color: var(--border2) !important;
-}
-
-/* Individual options */
 .f1-dropdown .dash-dropdown-options {
     background: var(--card2) !important;
 }
+
 .f1-dropdown .dash-dropdown-option {
     color: var(--white) !important;
-    background: var(--card2) !important;
-    font-size: 12px;
+    background: transparent !important;
+    font-size: 12px !important;
+    font-family: var(--font-mono) !important;
+    transition: background 0.15s !important;
+    padding: 8px 12px !important;
 }
+
 .f1-dropdown .dash-dropdown-option:hover,
 .f1-dropdown .dash-dropdown-option[aria-selected="true"] {
     background: var(--red) !important;
     color: #fff !important;
 }
 
-/* Chevron / trigger icon */
-.f1-dropdown .dash-dropdown-trigger-icon {
-    color: var(--grey) !important;
-    fill: var(--grey) !important;
+.f1-dropdown .dash-dropdown-search,
+.f1-dropdown .dash-dropdown-search-container input {
+    background: transparent !important;
+    color: var(--white) !important;
+    caret-color: var(--red) !important;
+    font-family: var(--font-mono) !important;
+    border: none !important;
 }
 
-/* Clear (×) button */
-.f1-dropdown .dash-dropdown-clear {
-    color: var(--grey) !important;
+.f1-dropdown .dash-dropdown-trigger-icon {
+    color: var(--muted) !important;
 }
+
+.f1-dropdown .dash-dropdown-clear {
+    color: var(--muted) !important;
+    transition: color 0.15s !important;
+}
+
 .f1-dropdown .dash-dropdown-clear:hover {
     color: var(--white) !important;
 }
 
-/* ── Driver text inputs ─────────────────────────────────────────────────── */
-#input-driver,
-#input-driver2 {
-    background-color: var(--card2) !important;
-    color: var(--white) !important;
-    border: 1px solid var(--border2) !important;
-    outline: none;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-}
-#input-driver:focus {
-    border-color: var(--red) !important;
-    box-shadow: 0 0 0 2px rgba(225,6,0,0.15) !important;
-}
-#input-driver2:focus {
-    border-color: var(--orange) !important;
-    box-shadow: 0 0 0 2px rgba(255,140,0,0.15) !important;
+/* ── Section headers ──────────────────────────────────────────────────────── */
+.section-header {
+    user-select: none;
 }
 
-/* ── Analyze button ─────────────────────────────────────────────────────── */
-#btn-analyze:hover  { background-color: #C00500 !important; }
-#btn-analyze:active { transform: scale(0.97); }
-
-/* ── Stats bar chip hover ───────────────────────────────────────────────── */
-#stats-bar > div {
-    transition: border-color 0.15s, border-top-color 0.15s;
-}
-#stats-bar > div:hover {
-    border-color: var(--border2) !important;
-    border-top-color: var(--red) !important;
+/* ── Radio card ───────────────────────────────────────────────────────────── */
+.radio-card {
+    animation: slideUp 0.25s var(--ease);
+    background: var(--card) !important;
+    border: 1px solid var(--border) !important;
+    border-left: 3px solid var(--red) !important;
+    border-radius: var(--radius-lg) !important;
+    padding: 20px 24px !important;
 }
 
-/* ── Plotly modebar ─────────────────────────────────────────────────────── */
+/* ── Plotly modebar ───────────────────────────────────────────────────────── */
 .modebar {
-    background: rgba(17,17,17,0.85) !important;
-    border-radius: 4px;
+    background: rgba(14,14,18,0.9) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-sm) !important;
+    backdrop-filter: blur(8px) !important;
+    padding: 2px !important;
 }
-.modebar-btn path        { fill: var(--grey) !important; }
-.modebar-btn:hover path  { fill: var(--red)  !important; }
-.modebar-btn.active path { fill: var(--red)  !important; }
 
-/* ── Plotly unified hover label ─────────────────────────────────────────── */
+.modebar-btn path        { fill: var(--muted) !important; }
+.modebar-btn:hover path  { fill: var(--red)   !important; }
+.modebar-btn.active path { fill: var(--red)   !important; }
+
+/* ── Plotly hover label ───────────────────────────────────────────────────── */
 .hoverlayer .unified-hover-label rect {
     fill:   var(--card2) !important;
     stroke: var(--border2) !important;
+    rx: 6 !important;
 }
+
 .hoverlayer .unified-hover-label text {
     fill: var(--white) !important;
 }
 
-/* ── Radio card fade-in ─────────────────────────────────────────────────── */
-.radio-card { animation: fadeIn 0.25s ease; }
+/* ── Scrollbar ────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar             { width: 5px; height: 5px; }
+::-webkit-scrollbar-track       { background: var(--surface); }
+::-webkit-scrollbar-thumb       { background: var(--muted2); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--red); }
 
-/* ── Lap time chart fade-in ─────────────────────────────────────────────── */
-#chart-lap-times .js-plotly-plot { animation: fadeIn 0.3s ease; }
-
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(6px); }
-    to   { opacity: 1; transform: translateY(0);   }
+/* ── Animations ───────────────────────────────────────────────────────────── */
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ── Scrollbar ──────────────────────────────────────────────────────────── */
-::-webkit-scrollbar       { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: var(--surface); }
-::-webkit-scrollbar-thumb { background: var(--red); border-radius: 3px; }
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.5; }
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+    }
+}
