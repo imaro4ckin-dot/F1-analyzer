@@ -269,7 +269,83 @@ body {
     fill: var(--white) !important;
 }
 
-/* ── Scrollbar ────────────────────────────────────────────────────────────── */
+/* ── Nav tabs ─────────────────────────────────────────────────────────────── */
+.nav-tab {
+    display: inline-flex;
+    align-items: center;
+    transition: color 0.18s, background 0.18s, border-color 0.18s;
+}
+
+.nav-tab:hover {
+    color: var(--white) !important;
+    background-color: rgba(255,255,255,0.05) !important;
+    border-color: var(--border) !important;
+}
+
+/* Race page fade-in */
+#page-content {
+    animation: fadeIn 0.25s ease;
+}
+
+/* Results table row hover */
+.lb-row:hover {
+    background: rgba(255,255,255,0.03) !important;
+}
+
+/* ── Race map play button ─────────────────────────────────────────────────── */
+.race-map-play-btn:hover {
+    box-shadow: 0 6px 24px var(--red-glow) !important;
+    transform: translateY(-1px);
+}
+
+.race-map-play-btn:active {
+    transform: translateY(0) scale(0.97) !important;
+}
+
+/* ── Race map slider ──────────────────────────────────────────────────────── */
+.race-map-slider .rc-slider-rail {
+    background: var(--card2) !important;
+    height: 4px !important;
+}
+
+.race-map-slider .rc-slider-track {
+    background: var(--red) !important;
+    height: 4px !important;
+}
+
+.race-map-slider .rc-slider-handle {
+    background: var(--red) !important;
+    border-color: var(--red) !important;
+    box-shadow: 0 0 0 4px var(--red-dim) !important;
+    width: 14px !important;
+    height: 14px !important;
+    margin-top: -5px !important;
+    opacity: 1 !important;
+}
+
+.race-map-slider .rc-slider-handle:hover,
+.race-map-slider .rc-slider-handle:focus {
+    box-shadow: 0 0 0 6px var(--red-dim) !important;
+}
+
+.race-map-slider .rc-slider-tooltip-inner {
+    background: var(--card2) !important;
+    color: var(--white) !important;
+    font-family: var(--font-mono) !important;
+    font-size: 10px !important;
+    border: 1px solid var(--border2) !important;
+    border-radius: 4px !important;
+    box-shadow: none !important;
+    padding: 2px 7px !important;
+}
+
+.race-map-slider .rc-slider-mark-text {
+    color: var(--muted) !important;
+    font-family: var(--font-mono) !important;
+    font-size: 9px !important;
+}
+
+
 ::-webkit-scrollbar             { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track       { background: var(--surface); }
 ::-webkit-scrollbar-thumb       { background: var(--muted2); border-radius: 99px; }
