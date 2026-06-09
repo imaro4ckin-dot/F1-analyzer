@@ -9,11 +9,12 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
 import joblib
 
-# ── macOS SSL fix for NLTK download ─────────────────────────────────────────
-try:
-    ssl._create_default_https_context = ssl._create_unverified_context
-except AttributeError:
-    pass
+# ── macOS SSL fix for NLTK download (local dev only, set DISABLE_SSL_VERIFY=true) ──
+if os.getenv("DISABLE_SSL_VERIFY", "false").lower() == "true":
+    try:
+        ssl._create_default_https_context = ssl._create_unverified_context
+    except AttributeError:
+        pass
 
 nltk.download('vader_lexicon', quiet=True)
 sia = SentimentIntensityAnalyzer()

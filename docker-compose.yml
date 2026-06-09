@@ -1,0 +1,13 @@
+services:
+  f1-analyzer:
+    build: .
+    ports:
+      - "8050:8050"
+    env_file: .env
+    volumes:
+      # Persist the FastF1 cache between container restarts (~3 GB)
+      - f1_cache:/app/cache
+    restart: unless-stopped
+
+volumes:
+  f1_cache:

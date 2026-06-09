@@ -4,10 +4,15 @@ import fastf1
 import requests
 import pandas as pd
 
-# macOS SSL bypass for FastF1 / model weight downloads
-ssl._create_default_https_context = ssl._create_unverified_context
+# SSL bypass only in local dev (macOS cert issue).
+# In production, ensure system certs are valid instead.
+if os.getenv("DISABLE_SSL_VERIFY", "false").lower() == "true":
+    ssl._create_default_https_context = ssl._create_unverified_context
 
-_CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "cache")
+_CACHE_DIR = os.getenv(
+    "CACHE_DIR",
+    os.path.join(os.path.dirname(__file__), "..", "cache"),
+)
 os.makedirs(_CACHE_DIR, exist_ok=True)
 fastf1.Cache.enable_cache(_CACHE_DIR)
 

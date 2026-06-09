@@ -8,8 +8,9 @@ import ssl
 import time
 
 # --- SETUP & CONFIGURATION ---
-# 1. Bypass macOS SSL certificate verification for downloading model weights
-ssl._create_default_https_context = ssl._create_unverified_context
+# 1. Bypass macOS SSL certificate verification (local dev only, set DISABLE_SSL_VERIFY=true)
+if os.getenv("DISABLE_SSL_VERIFY", "false").lower() == "true":
+    ssl._create_default_https_context = ssl._create_unverified_context
 
 # 2. Configure local directory caching for FastF1 data packages
 os.makedirs('cache', exist_ok=True)

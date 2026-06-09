@@ -4,6 +4,9 @@ import os
 # Ensure project root is on the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output
@@ -22,6 +25,9 @@ app = dash.Dash(
 app.layout = build_layout()
 register_callbacks(app)
 register_race_callbacks(app)
+
+# Expose WSGI server for Gunicorn: gunicorn app.dashboard:server
+server = app.server
 
 
 # ── Page routing ──────────────────────────────────────────────────────────────
@@ -70,4 +76,7 @@ def highlight_nav_tab(pathname):
 
 
 if __name__ == "__main__":
-    app.run(debug=False, port=8050, host="127.0.0.1")
+    debug = os.getenv("DEBUG", "false").lower() == "true"
+    port = int(os.getenv("PORT", "8050"))
+    host = os.getenv("HOST", "127.0.0.1")
+    app.run(debug=debug, port=port, host=host)

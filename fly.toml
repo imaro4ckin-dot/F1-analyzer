@@ -1,0 +1,37 @@
+# fly.toml — Fly.io deployment config for F1 Stress Analyzer
+# Docs: https://fly.io/docs/reference/configuration/
+
+app = "f1-stress-analyzer"
+primary_region = "ams"
+
+[build]
+  # Uses your existing Dockerfile — Whisper medium model is pre-downloaded at build time
+
+[env]
+  PORT     = "8050"
+  HOST     = "0.0.0.0"
+  DEBUG    = "false"
+  CACHE_DIR = "/data/cache"
+
+[http_service]
+  internal_port       = 8050
+  force_https         = true
+  auto_stop_machines  = true   # pause when idle to save cost
+  auto_start_machines = true   # wake up on incoming request
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type       = "requests"
+    hard_limit = 10
+    soft_limit = 5
+
+[[vm]]
+  # Whisper medium model needs ~1.5 GB RAM minimum; 2 GB gives comfortable headroom
+  memory = "2gb"
+  cpus   = 1
+
+[mounts]
+  # Persistent volume for FastF1 cache (~3 GB) — survives deploys and restarts
+  # Create it once with: fly volumes create f1_cache --size 5 --region ams
+  source      = "f1_cache"
+  destination = "/data/cache"
